@@ -10,7 +10,7 @@ After you press connect and see your inputs work you can close the window. You s
 **DISCLAIMER**
 
 I take **NO** responsibility for any damages done by the code. I am an amateur that did this for fun / own use.
-**USE AT YOUR OWN RISK!**
+**USE AT YOUR OWN RISK!** Idk if i handle threads there correctly, especially when closing the window and the HID process is still running. Idk if it closes.
 
 **Special Thanks**
 
