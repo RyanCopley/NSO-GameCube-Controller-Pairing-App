@@ -29,3 +29,8 @@ Also the website sends way more commands. I only send the initial one and the LE
 **Special Thanks**
 
 Big thanks to handheldlegend for letting me use his code in this and Nohzockt for his code.
+
+**LICENSES**
+HidLibrary: MIT License
+LibUsbDotNet: GNU Lesser General Public License v3.0
+Nefarius.ViGEm.Client: MIT License
