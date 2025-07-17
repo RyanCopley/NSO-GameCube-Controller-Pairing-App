@@ -1,4 +1,4 @@
-![](https://github.com/Accolith/GC-controller-enabler/blob/main/Screenshot%202025-07-14%20204357.png)
+
 
 **About**
 
