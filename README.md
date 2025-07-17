@@ -22,7 +22,7 @@ Or run "dotnet build WinFormsApp1/WinFormsApp1.csproj -c Release" in the reposit
 
 After you press connect and see your inputs work you can close the window. You should then be able to configure the controller in steam successfully. For me I only had to configure once, on later uses I just had to use the tool and steam remembered the configured controller.
 
-Optional, you can also press the Emulate button. The tool then emulates a 360 controller for simpler use in non-steam games etc + the analog shoulder buttons then work. You need to have [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases/tag/v1.22.0) installed for it to work.
+Optional, you can also press the Emulate button. The tool then emulates a 360 controller for simpler use in non-steam games etc + the analog shoulder buttons then work. You need to have [ViGEmBus](https://github.com/nefarius/ViGEmBus) installed for it to work.
 
 **DISCLAIMER**
 
