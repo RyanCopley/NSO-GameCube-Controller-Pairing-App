@@ -16,7 +16,7 @@ You can also press the Emulate button after connecting to make it emulate a 360 
 
 - Install .NET SDK in Visual Studio
 - Build it :D
-Or run "dotnet build WinFormsApp1/WinFormsApp1.csproj -c Release" in the repository.
+- Or run "dotnet build WinFormsApp1/WinFormsApp1.csproj -c Release" in the repository.
 
 You might need to change the values for the analog shoulder button emulation. Each controller seems to have varying values for non-pressed, fully pressed, and at the bump. So you might need to adapt them to your controllers values in order to get full coverage and no jumps in values. After pressing Connect, you can live-read the sent values to the left and the emulated values right. By calibrating with the values you get, it should become more accurate.
 
