@@ -9,9 +9,6 @@ using System;
 using System.Diagnostics;
 using System.Security.Cryptography;
 
-// initializes the SDK instance
-
-
 namespace WinFormsApp1
 {
     public partial class Form1 : Form
@@ -41,6 +38,18 @@ namespace WinFormsApp1
             }
         }
 
+        // For calibration
+        double range_left_base;
+        double range_left_bump;
+        double range_left_max;
+
+        double range_right_base;
+        double range_right_bump;
+        double range_right_max;
+
+
+
+
         ButtonInfo[] buttons = new ButtonInfo[]
         {
             new ButtonInfo(3, 0x01, "B"),
@@ -66,6 +75,22 @@ namespace WinFormsApp1
         public Form1()
         {
             InitializeComponent();
+
+            // Update with past calibraion values
+            baseValLeft.Text = Settings1.Default.leftBase;
+            bumpValLeft.Text = Settings1.Default.leftBumb;
+            maxValLeft.Text = Settings1.Default.leftMax;
+
+            baseValRight.Text = Settings1.Default.rightBase;
+            bumpValRight.Text = Settings1.Default.rightBump;
+            maxValRight.Text = Settings1.Default.rightMax;
+
+            bump100.Checked = Settings1.Default.checked1;
+            radioButton2.Checked = Settings1.Default.checked2;
+
+
+            Xbox360Button.Checked = Settings1.Default.checkedXbox;
+            DualshockButton.Checked = Settings1.Default.checkedPs4;
         }
         private void InitHIDDevice()
         {
@@ -126,6 +151,24 @@ namespace WinFormsApp1
             double right_x = 0;
             double right_y = 0;
 
+            float normX_left;
+            float normY_left;
+            float normX_right;
+            float normY_right;
+
+            int leftStickX;
+            int leftStickY;
+            int rightStickX;
+            int rightStickY;
+
+            byte[] hexData;
+
+            double left_trigger_emulation;
+            double right_trigger_emulation;
+
+            double range_left_emulation;
+            double range_right_emulation;
+
             try
             {
                 while (!token.IsCancellationRequested)
@@ -141,19 +184,19 @@ namespace WinFormsApp1
 
                     if (data.Status == HidDeviceData.ReadStatus.Success)
                     {
-                        byte[] hexData = data.Data;
+                        hexData = data.Data;
 
                         // Sticks
-                        int leftStickX =    hexData[6] | ((hexData[7] & 0x0F) << 8);
-                        int leftStickY =  ((hexData[7] >> 4) | (hexData[8] << 4));
-                        int rightStickX =   hexData[9] | ((hexData[10] & 0x0F) << 8);
-                        int rightStickY = ((hexData[10] >> 4) | (hexData[11] << 4));
+                        leftStickX = hexData[6] | ((hexData[7] & 0x0F) << 8);
+                        leftStickY = ((hexData[7] >> 4) | (hexData[8] << 4));
+                        rightStickX = hexData[9] | ((hexData[10] & 0x0F) << 8);
+                        rightStickY = ((hexData[10] >> 4) | (hexData[11] << 4));
 
                         // Normalize + Scale
-                        float normX_left = (leftStickX - 2048);
-                        float normY_left = (leftStickY - 2048);
-                        float normX_right = (rightStickX - 2048);
-                        float normY_right = (rightStickY - 2048);
+                        normX_left = (leftStickX - 2048);
+                        normY_left = (leftStickY - 2048);
+                        normX_right = (rightStickX - 2048);
+                        normY_right = (rightStickY - 2048);
 
                         left_x = normX_left * (32767 / 1240);
                         left_y = normY_left * (32767 / 1240);
@@ -161,47 +204,67 @@ namespace WinFormsApp1
                         right_y = normY_right * (32767 / 1240);
 
                         // Limit to inner circle
-                        if (left_x > max_stick_val) left_x   = max_stick_val;
-                        if (left_y > max_stick_val) left_y   = max_stick_val;
+                        if (left_x > max_stick_val) left_x = max_stick_val;
+                        if (left_y > max_stick_val) left_y = max_stick_val;
                         if (right_x > max_stick_val) right_x = max_stick_val;
                         if (right_y > max_stick_val) right_y = max_stick_val;
 
-                        if (left_x < -max_stick_val) left_x   = -max_stick_val;
-                        if (left_y < -max_stick_val) left_y   = -max_stick_val;
+                        if (left_x < -max_stick_val) left_x = -max_stick_val;
+                        if (left_y < -max_stick_val) left_y = -max_stick_val;
                         if (right_x < -max_stick_val) right_x = -max_stick_val;
                         if (right_y < -max_stick_val) right_y = -max_stick_val;
 
                         // Set values
-
                         controller.SetAxisValue(Xbox360Axis.LeftThumbX, (short)left_x);
                         controller.SetAxisValue(Xbox360Axis.LeftThumbY, (short)left_y);
 
                         controller.SetAxisValue(Xbox360Axis.RightThumbX, (short)right_x);
                         controller.SetAxisValue(Xbox360Axis.RightThumbY, (short)right_y);
 
-                        Invoke((Delegate)(() => label1.Text = "" + leftStickX + ", " + normX_left + ", " + (short)left_x));
+                        // Analog triggers: 0 - 255, but resting value ~ 32, max before "click" ~ 190, max ~230 for me
+                        left_trigger_emulation = (double)hexData[13];
+                        right_trigger_emulation = (double)hexData[14];
+
+                        // Normalize values bump100: at the bump should be 100%, pressing more just activates L/R
+                        // Else: use pressed in max value for 100% reading
+                        if (bump100.Checked)
+                        {
+                            range_left_emulation = range_left_bump - range_left_base;
+                            range_right_emulation = range_right_bump - range_right_base;
+                        }
+                        else
+                        {
+                            range_left_emulation = range_left_max - range_left_base;
+                            range_right_emulation = range_right_max - range_right_base;
+                        }
+
+                        left_trigger_emulation = left_trigger_emulation - range_left_base;
+                        if (left_trigger_emulation < 0) left_trigger_emulation = 0;
+
+                        right_trigger_emulation = right_trigger_emulation - range_right_base;
+                        if (right_trigger_emulation < 0) right_trigger_emulation = 0;
+
+                        if (bump100.Checked) // Prevent overflow if bump value slightly off
+                        {
+                            left_trigger_emulation = left_trigger_emulation / range_left_emulation * 255;
+                            right_trigger_emulation = right_trigger_emulation / range_right_emulation * 255;
+
+                            if (left_trigger_emulation > 255)
+                            {
+                                left_trigger_emulation = 255;
+                            }
 
 
-                        // Analog triggers: 0 - 255, but resting value ~ 32, max before "click" ~ 190, max ~230
-                        double left_trigger = (double)hexData[13];
-                        double right_trigger = (double)hexData[14];
-
-                        // Normalize values
-                        double range = 190 - 32;
-
-                        left_trigger = left_trigger -32;
-                        if (left_trigger < 0) left_trigger = 0;
-
-                        right_trigger = right_trigger - 32;
-                        if (right_trigger < 0) right_trigger = 0;
-
-
-                        if (left_trigger <= 158) left_trigger = left_trigger / 159 * 255;
-                        if (right_trigger <= 158) right_trigger = right_trigger / 159 * 255;
-
-                        // Set values
-                        controller.SetSliderValue(Xbox360Slider.LeftTrigger, (byte)left_trigger);
-                        controller.SetSliderValue(Xbox360Slider.RightTrigger, (byte)right_trigger);
+                            if (right_trigger_emulation > 255)
+                            {
+                                right_trigger_emulation = 255;
+                            }
+                        }
+                        else // bump cant be max
+                        {
+                            left_trigger_emulation = left_trigger_emulation / range_left_emulation * 255;
+                            right_trigger_emulation = right_trigger_emulation / range_right_emulation * 255;
+                        }
 
                         // Buttons
                         bool aPressed = false;
@@ -280,27 +343,30 @@ namespace WinFormsApp1
                                 }
                             }
                         }
-                        controller.SetButtonState(Xbox360Button.B, bPressed);
-                        controller.SetButtonState(Xbox360Button.A, aPressed);
-                        controller.SetButtonState(Xbox360Button.Y, yPressed);
-                        controller.SetButtonState(Xbox360Button.X, xPressed);
+                        controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.B, bPressed);
+                        controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.A, aPressed);
+                        controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.Y, yPressed);
+                        controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.X, xPressed);
+
                         if (rPressed) controller.SetSliderValue(Xbox360Slider.RightTrigger, 255);
-                        controller.SetButtonState(Xbox360Button.RightShoulder, zPressed);
-                        if (startPressed || homePressed || chatPressed)
-                        {
-                            controller.SetButtonState(Xbox360Button.Start, true);
-                        }
-                        else
-                        {
-                            controller.SetButtonState(Xbox360Button.Start, false);
-                        }
-                        controller.SetButtonState(Xbox360Button.Down, downPressed);
-                        controller.SetButtonState(Xbox360Button.Right, rightPressed);
-                        controller.SetButtonState(Xbox360Button.Left, leftPressed);
-                        controller.SetButtonState(Xbox360Button.Up, upPressed);
+                        else controller.SetSliderValue(Xbox360Slider.RightTrigger, (byte)right_trigger_emulation);
+
+                        controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.RightShoulder, zPressed);
+
+                        if (startPressed || homePressed || chatPressed) controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.Start, true);
+                        else controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.Start, false);
+
+                        controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.Down, downPressed);
+                        controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.Right, rightPressed);
+                        controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.Left, leftPressed);
+                        controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.Up, upPressed);
+
+
                         if (lPressed) controller.SetSliderValue(Xbox360Slider.LeftTrigger, 255);
-                        controller.SetButtonState(Xbox360Button.LeftShoulder, zlPressed);
-                        controller.SetButtonState(Xbox360Button.Back, capturePressed);
+                        else controller.SetSliderValue(Xbox360Slider.LeftTrigger, (byte)left_trigger_emulation);
+
+                        controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.LeftShoulder, zlPressed);
+                        controller.SetButtonState(Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button.Back, capturePressed);
                     }
                 }
             }
@@ -434,6 +500,34 @@ namespace WinFormsApp1
         }
         private void ReadHidLoop(CancellationToken token)
         {
+            double max_stick_val = 32767 * Math.Sin(45);
+
+            double left_x = 0;
+            double left_y = 0;
+            double right_x = 0;
+            double right_y = 0;
+
+            float normX_left;
+            float normY_left;
+            float normX_right;
+            float normY_right;
+
+            int leftStickX;
+            int leftStickY;
+            int rightStickX;
+            int rightStickY;
+
+            byte[] hexData;
+
+            double left_trigger_emulation = 0;
+            double right_trigger_emulation = 0;
+
+            double range_left_emulation = 0;
+            double range_right_emulation = 0;
+
+            byte left_trigger;
+            byte right_trigger;
+
             try
             {
                 while (!token.IsCancellationRequested)
@@ -450,35 +544,89 @@ namespace WinFormsApp1
                     if (data.Status == HidDeviceData.ReadStatus.Success)
                     {
                         emptyLabels();
-                        byte[] hexData = data.Data;
+                        hexData = data.Data;
 
-                        int leftStickX = hexData[6] | ((hexData[7] & 0x0F) << 8);
-                        int leftStickY = ((hexData[7] >> 4) | (hexData[8] << 4));
-                        int rightStickX = hexData[9] | ((hexData[10] & 0x0F) << 8);
-                        int rightStickY = ((hexData[10] >> 4) | (hexData[11] << 4));
+                        leftStickX = hexData[6] | ((hexData[7] & 0x0F) << 8);
+                        leftStickY = ((hexData[7] >> 4) | (hexData[8] << 4));
+                        rightStickX = hexData[9] | ((hexData[10] & 0x0F) << 8);
+                        rightStickY = ((hexData[10] >> 4) | (hexData[11] << 4));
 
-                        
+
                         // Norm around -1 to +1
-                        float normX_left = (leftStickX - 2048) / 2048f;
-                        float normY_left = (leftStickY - 2048) / 2048f;
+                        normX_left = (leftStickX - 2048) / 2048f;
+                        normY_left = (leftStickY - 2048) / 2048f;
 
-                        float normX_right = (rightStickX - 2048) / 2048f;
-                        float normY_right = (rightStickY - 2048) / 2048f;
+                        normX_right = (rightStickX - 2048) / 2048f;
+                        normY_right = (rightStickY - 2048) / 2048f;
 
                         Invoke((Delegate)(() => stick_left.Location = new Point(216 + (int)(normX_left * 20), (97 - (int)(normY_left * 20)))));
                         Invoke((Delegate)(() => stick_right.Location = new Point(330 + (int)(normX_right * 15), (150 - (int)(normY_right * 15)))));
 
 
+
                         if (hexData.Length > 14)
                         {
-                            byte left_trigger = (byte)hexData[13];
-                            byte right_trigger = (byte)hexData[14];
-                            Invoke((Delegate)(() => label1.Text = "" + left_trigger + ", " + right_trigger));
+                            left_trigger = (byte)hexData[13];
+                            right_trigger = (byte)hexData[14];
+
+                            // Analog triggers: 0 - 255, but resting value ~ 32, max before "click" ~ 190, max ~230 for me
+                            left_trigger_emulation = (double)hexData[13];
+                            right_trigger_emulation = (double)hexData[14];
+
+                            // Normalize values bump100: at the bump should be 100%, pressing more just activates L/R
+                            // Else: use pressed in max value for 100% reading
+                            if (bump100.Checked)
+                            {
+                                range_left_emulation = range_left_bump - range_left_base;
+                                range_right_emulation = range_right_bump - range_right_base;
+                            }
+                            else
+                            {
+                                range_left_emulation = range_left_max - range_left_base;
+                                range_right_emulation = range_right_max - range_right_base;
+                            }
+
+                            left_trigger_emulation = left_trigger_emulation - range_left_base;
+                            if (left_trigger_emulation < 0) left_trigger_emulation = 0;
+
+                            right_trigger_emulation = right_trigger_emulation - range_right_base;
+                            if (right_trigger_emulation < 0) right_trigger_emulation = 0;
+
+                            // Prevent overflow
+                            if (bump100.Checked)
+                            {
+                                left_trigger_emulation = left_trigger_emulation / range_left_emulation * 255;
+                                right_trigger_emulation = right_trigger_emulation / range_right_emulation * 255;
+
+                                if (left_trigger_emulation > 255)
+                                {
+                                    left_trigger_emulation = 255;
+                                }
+
+
+                                if (right_trigger_emulation > 255)
+                                {
+                                    right_trigger_emulation = 255;
+                                }
+                            }
+                            else // bump cant be max
+                            {
+                                left_trigger_emulation = left_trigger_emulation / range_left_emulation * 255;
+                                right_trigger_emulation = right_trigger_emulation / range_right_emulation * 255;
+                            }
                             // Trick to make it update instant and not slowly flow in
                             Invoke((Delegate)(() => progressBarLeft.Value = (byte)hexData[13] + 1));
                             Invoke((Delegate)(() => progressBarLeft.Value = (byte)hexData[13]));
                             Invoke((Delegate)(() => progressBarRight.Value = (byte)hexData[14] + 1));
                             Invoke((Delegate)(() => progressBarRight.Value = (byte)hexData[14]));
+
+                            Invoke((Delegate)(() => progressBarLeftCal.Value = (byte)hexData[13] + 1));
+                            Invoke((Delegate)(() => progressBarLeftCal.Value = (byte)hexData[13]));
+                            Invoke((Delegate)(() => progressBarRightCal.Value = (byte)hexData[14] + 1));
+                            Invoke((Delegate)(() => progressBarRightCal.Value = (byte)hexData[14]));
+
+                            Invoke((Delegate)(() => label11.Text = "" + (byte)hexData[13]));
+                            Invoke((Delegate)(() => label12.Text = "" + (byte)hexData[14]));
 
                             for (int i = 0; i < 18; i++)
                             {
@@ -501,6 +649,7 @@ namespace WinFormsApp1
                                             break;
                                         case "R":
                                             Invoke((Delegate)(() => R.Text = "X"));
+                                            right_trigger_emulation = 255;
                                             break;
                                         case "Z":
                                             Invoke((Delegate)(() => Z.Text = "X"));
@@ -522,6 +671,7 @@ namespace WinFormsApp1
                                             break;
                                         case "L":
                                             Invoke((Delegate)(() => L.Text = "X"));
+                                            left_trigger_emulation = 255;
                                             break;
                                         case "ZL":
                                             Invoke((Delegate)(() => ZL.Text = "X"));
@@ -548,6 +698,14 @@ namespace WinFormsApp1
                                 }
                             }
                         }
+                        // In calibration window: simulate the output
+                        Invoke((Delegate)(() => progressBarEmulationLeft.Value = (byte)left_trigger_emulation + 1));
+                        Invoke((Delegate)(() => progressBarEmulationLeft.Value = (byte)left_trigger_emulation));
+                        Invoke((Delegate)(() => progressBarEmulationOutputRight.Value = (byte)right_trigger_emulation + 1));
+                        Invoke((Delegate)(() => progressBarEmulationOutputRight.Value = (byte)right_trigger_emulation));
+
+                        Invoke((Delegate)(() => label13.Text = "" + (byte)left_trigger_emulation));
+                        Invoke((Delegate)(() => label14.Text = "" + (byte)right_trigger_emulation));
                     }
                 }
             }
@@ -580,10 +738,8 @@ namespace WinFormsApp1
 
         private void button2_Click(object sender, EventArgs e)
         {
-            System.Diagnostics.Debug.WriteLine("button2_Click aufgerufen");
             button1.Enabled = false;
             button2.Enabled = false;
-            System.Diagnostics.Debug.WriteLine("button2_Click aufgerufen");
 
             if (_isReading) stopReadingHID();
 
@@ -609,12 +765,28 @@ namespace WinFormsApp1
             progressBarRight.Minimum = 0;
             progressBarRight.Maximum = 255;
 
+            progressBarLeftCal.Minimum = 0;
+            progressBarLeftCal.Maximum = 255;
+
+            progressBarRightCal.Minimum = 0;
+            progressBarRightCal.Maximum = 255;
+
+
+            progressBarEmulationLeft.Minimum = 0;
+            progressBarEmulationLeft.Maximum = 256;
+            progressBarEmulationOutputRight.Minimum = 0;
+            progressBarEmulationOutputRight.Maximum = 256;
+
             // Set progress
             progressBar1.Value = 0;
             progressBarLeft.Value = 0;
             progressBarRight.Value = 0;
 
+            progressBarLeftCal.Value = 0;
+            progressBarRightCal.Value = 0;
 
+            progressBarEmulationLeft.Value = 0;
+            progressBarEmulationOutputRight.Value = 0;
         }
         private async void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
@@ -662,32 +834,112 @@ namespace WinFormsApp1
 
         }
 
-        private void checkBox_360_CheckedChanged(object sender, EventArgs e)
+        private void baseValLeft_TextChanged(object sender, EventArgs e)
         {
-            if (suppressEvents) return;
-
-            suppressEvents = true;
-
-            if (checkBox_360.Checked)
-            {
-                checkBox_ps4.Checked = false;
-            }
-
-            suppressEvents = false;
+            Settings1.Default.leftBase = baseValLeft.Text;
+            Settings1.Default.Save();
+            Double.TryParse(baseValLeft.Text, out range_left_base);
         }
 
-        private void checkBox_ps4_CheckedChanged(object sender, EventArgs e)
+        private void bumpValLeft_TextChanged(object sender, EventArgs e)
+        {
+            Settings1.Default.leftBumb = bumpValLeft.Text;
+            Settings1.Default.Save();
+            Double.TryParse(bumpValLeft.Text, out range_left_bump);
+        }
+
+        private void maxValLeft_TextChanged(object sender, EventArgs e)
+        {
+            Settings1.Default.leftMax = maxValLeft.Text;
+            Settings1.Default.Save();
+            Double.TryParse(maxValLeft.Text, out range_left_max);
+        }
+
+        private void baseValRight_TextChanged(object sender, EventArgs e)
+        {
+            Settings1.Default.rightBase = baseValRight.Text;
+            Settings1.Default.Save();
+            Double.TryParse(baseValRight.Text, out range_right_base);
+        }
+
+        private void bumpValRight_TextChanged(object sender, EventArgs e)
+        {
+            Settings1.Default.rightBump = bumpValRight.Text;
+            Settings1.Default.Save();
+            Double.TryParse(bumpValRight.Text, out range_right_bump);
+        }
+
+        private void maxValRight_TextChanged(object sender, EventArgs e)
+        {
+            Settings1.Default.rightMax = maxValRight.Text;
+            Settings1.Default.Save();
+            Double.TryParse(maxValRight.Text, out range_right_max);
+        }
+
+        private void radioButton1_CheckedChanged(object sender, EventArgs e)
         {
             if (suppressEvents) return;
 
             suppressEvents = true;
 
-            if (checkBox_ps4.Checked)
+            if (bump100.Checked)
             {
-                checkBox_360.Checked = false;
+                radioButton2.Checked = false;
             }
 
             suppressEvents = false;
+
+            Settings1.Default.checked1 = bump100.Checked;
+            Settings1.Default.Save();
+        }
+
+
+        private void radioButton2_CheckedChanged(object sender, EventArgs e)
+        {
+            if (suppressEvents) return;
+
+            suppressEvents = true;
+
+            if (radioButton2.Checked)
+            {
+                bump100.Checked = false;
+            }
+
+            suppressEvents = false;
+            Settings1.Default.checked2 = radioButton2.Checked;
+            Settings1.Default.Save();
+        }
+
+        private void xBox360Button_CheckedChanged_1(object sender, EventArgs e)
+        {
+            if (suppressEvents) return;
+
+            suppressEvents = true;
+
+            if (Xbox360Button.Checked)
+            {
+                DualshockButton.Checked = false;
+            }
+
+            suppressEvents = false;
+            Settings1.Default.checkedXbox = Xbox360Button.Checked;
+            Settings1.Default.Save();
+        }
+
+        private void DualshockButton_CheckedChanged(object sender, EventArgs e)
+        {
+            if (suppressEvents) return;
+
+            suppressEvents = true;
+
+            if (DualshockButton.Checked)
+            {
+                Xbox360Button.Checked = false;
+            }
+
+            suppressEvents = false;
+            Settings1.Default.checkedPs4 = DualshockButton.Checked;
+            Settings1.Default.Save();
         }
     }
 }
