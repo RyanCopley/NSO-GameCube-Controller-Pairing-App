@@ -1,46 +1,110 @@
 ![](https://github.com/Accolith/GC-controller-enabler/blob/main/Screenshot%202025-07-14%20204357.png)
+# GameCube Controller Enabler - Python Version
 
-**IMPORTANT**
+A Python/Tkinter implementation of the GameCube Controller Enabler tool that allows connecting GameCube controllers via USB to make them usable on Steam and other platforms.
 
-Dualshock support not included yet.
+## Features
 
-**About**
+- **USB Initialization**: Sends required initialization commands to GameCube controllers
+- **HID Communication**: Reads controller input via HID interface
+- **Xbox 360 Emulation**: Maps GameCube inputs to Xbox 360 controller using vgamepad
+- **Analog Trigger Calibration**: Configurable trigger ranges for different controller variations
+- **Visual Controller Display**: Real-time visualization of button presses, analog sticks, and triggers
+- **Settings Persistence**: Save and load calibration settings
 
-This is a small tool I wrote that lets you connect the gamecube controller via USB to make it usable on Steam.
-All it does is connect to the plugged in controller and send the 2 commands to initialize it and set the LED (idk if more are needed). Afterwards it stops the USB connection and connects via HID. Then it outputs the buttons sent via HID to check if it worked.
+## Requirements
 
-You can also press the Emulate button after connecting to make it emulate a 360 controller for non-steam games. Im not sure if i converted the analog inputs correctly as the scales are different between controllers.
+- Python 3.7 or higher
+- Windows (for Xbox 360 emulation via ViGEmBus)
 
+## Installation
 
-**How to build**
+1. Install Python dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-- Install .NET SDK in Visual Studio
-- Build it :D
-- Or run "dotnet build WinFormsApp1/WinFormsApp1.csproj -c Release" in the repository.
+2. For Xbox 360 emulation, install ViGEmBus driver:
+   - Download from: https://github.com/nefarius/ViGEmBus
+   - Install the driver according to their instructions
 
-You might need to change the values for the analog shoulder button emulation. Each controller seems to have varying values for non-pressed, fully pressed, and at the bump. So you might need to adapt them to your controllers values in order to get full coverage and no jumps in values. After pressing Connect, you can live-read the sent values to the left and the emulated values to the right. By calibrating with the values you get, it should become more accurate.
+## Usage
 
-The 2 options for percentages decide how the analog triggers are handeled:
-- "100% at bump" means that trigger value goes from 0 at base to 255 at the bump.
-- "100% at press" means that the trigger value goes from 0 at base to 255 at full press.
+### Running from Source
 
-**How to use**
+1. Run the application:
+```bash
+python gc_controller_enabler.py
+```
 
-After you press connect and see your inputs work you can close the window. You should then be able to configure the controller in steam successfully. For me I only had to configure once, on later uses I just had to use the tool and steam remembered the configured controller.
+### Running Pre-built Executables
 
-Optional, you can also press the Emulate button. The tool then emulates a 360 controller for simpler use in non-steam games etc + the analog shoulder buttons then work. You need to have [ViGEmBus](https://github.com/nefarius/ViGEmBus) installed for it to work.
+Download the appropriate executable for your platform from the releases page, or build your own using the provided build scripts:
 
-**DISCLAIMER**
+- **Windows**: Run `build_windows.bat` → executable in `dist/windows/`
+- **macOS**: Run `./build_macos.sh` → executable in `dist/macos/`  
+- **Linux**: Run `./build_linux.sh` → executable in `dist/linux/`
 
-I take **NO** responsibility for any damages done by the code. I am an amateur that did this for fun / own use.
-**USE AT YOUR OWN RISK!** Idk if i handle threads there correctly, especially when closing the window and the HID process is still running. Idk if it closes.
-Also the website sends way more commands. I only send the initial one and the LED command. I dont know if thats the right way to do it.
+See [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) for detailed build information.
 
-**Special Thanks**
+### Controller Setup
 
-Big thanks to handheldlegend for letting me use his code in this and Nohzockt for his code.
+1. Connect your GameCube controller via USB
+2. Click "Connect" to initialize the controller
+3. Optionally click "Emulate Xbox 360" to start virtual controller emulation
 
-**LICENSES**
+## Calibration
+
+Each GameCube controller may have different analog trigger ranges. The calibration section allows you to configure:
+
+- **Base Value**: Resting trigger position (typically ~32)
+- **Bump Value**: Position where trigger "clicks" (typically ~190)
+- **Max Value**: Fully pressed position (typically ~230)
+
+### Trigger Modes
+
+- **100% at bump**: Full trigger response at click point
+- **100% at press**: Full trigger response at maximum press
+
+To calibrate:
+1. Connect your controller
+2. Press and release triggers while observing the raw values
+3. Enter the observed base, bump, and max values
+4. Click "Save Settings" to persist the configuration
+
+## Dependencies
+
+- **hid**: HID device communication
+- **pyusb**: USB device initialization
+- **vgamepad**: Xbox 360 controller emulation (optional)
+
+## Troubleshooting
+
+### Controller Not Detected
+- Ensure GameCube controller adapter is properly connected
+- Check that the controller is recognized by Windows Device Manager
+- Verify Vendor ID (0x057e) and Product ID (0x2073)
+
+### Emulation Not Working
+- Install ViGEmBus driver from Nefarius
+- Ensure vgamepad is installed: `pip install vgamepad`
+- Run as administrator if needed
+
+### Permission Errors
+- On Windows, HID access may require administrator privileges
+- Try running the application as administrator
+
+## Differences from C# Version
+
+- Uses Python's hid library instead of HidLibrary
+- Uses pyusb instead of LibUsbDotNet
+- Uses vgamepad instead of Nefarius.ViGEm.Client
+- Tkinter GUI instead of Windows Forms
+- JSON settings file instead of .NET settings
+
+## License
+
+This Python version maintains the same open-source spirit as the original C# implementation. See the original LICENSE files for details.
 
 HidLibrary: MIT License
 
