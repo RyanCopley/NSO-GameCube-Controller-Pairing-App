@@ -60,6 +60,24 @@ class GCControllerEnabler:
                                 0x00, 0x00, 0x01, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
     SET_LED_DATA = bytes([0x09, 0x91, 0x00, 0x07, 0x00, 0x08,
                          0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+
+    # Xbox 360 button mapping (class-level to avoid per-frame allocation)
+    BUTTON_MAPPING = {
+        'A': GamepadButton.A,
+        'B': GamepadButton.B,
+        'X': GamepadButton.X,
+        'Y': GamepadButton.Y,
+        'Z': GamepadButton.RIGHT_SHOULDER,
+        'ZL': GamepadButton.LEFT_SHOULDER,
+        'Start/Pause': GamepadButton.START,
+        'Home': GamepadButton.GUIDE,
+        'Capture': GamepadButton.BACK,
+        'Chat': GamepadButton.BACK,
+        'Dpad Up': GamepadButton.DPAD_UP,
+        'Dpad Down': GamepadButton.DPAD_DOWN,
+        'Dpad Left': GamepadButton.DPAD_LEFT,
+        'Dpad Right': GamepadButton.DPAD_RIGHT,
+    }
     
     def __init__(self):
         self.root = tk.Tk()
@@ -102,13 +120,13 @@ class GCControllerEnabler:
         
         # Calibration values
         self.calibration = {
-            'left_base': 32.0,
-            'left_bump': 190.0,
-            'left_max': 230.0,
-            'right_base': 32.0,
-            'right_bump': 190.0,
-            'right_max': 230.0,
-            'bump_100_percent': False,
+            'trigger_left_base': 32.0,
+            'trigger_left_bump': 190.0,
+            'trigger_left_max': 230.0,
+            'trigger_right_base': 32.0,
+            'trigger_right_bump': 190.0,
+            'trigger_right_max': 230.0,
+            'trigger_bump_100_percent': False,
             'emulation_mode': 'xbox360',
             'stick_left_center_x': 2048, 'stick_left_range_x': 2048,
             'stick_left_center_y': 2048, 'stick_left_range_y': 2048,
@@ -134,7 +152,11 @@ class GCControllerEnabler:
         self.trigger_cal_last_left = 0
         self.trigger_cal_last_right = 0
 
+        # Lock for thread-safe access to calibration tracking state
+        self._cal_lock = threading.Lock()
+
         self.load_settings()
+        self._cached_calibration = self.calibration.copy()
         self.setup_ui()
         
         # Handle window closing
@@ -298,7 +320,7 @@ class GCControllerEnabler:
         mode_frame = ttk.LabelFrame(calibration_frame, text="Trigger Mode", padding="5")
         mode_frame.grid(row=2, column=0, pady=(10, 0), sticky=(tk.W, tk.E))
 
-        self.trigger_mode_var = tk.BooleanVar(value=self.calibration['bump_100_percent'])
+        self.trigger_mode_var = tk.BooleanVar(value=self.calibration['trigger_bump_100_percent'])
         ttk.Radiobutton(mode_frame, text="100% at bump",
                        variable=self.trigger_mode_var, value=True).grid(row=0, column=0, sticky=tk.W)
         ttk.Radiobutton(mode_frame, text="100% at press",
@@ -505,38 +527,40 @@ class GCControllerEnabler:
 
         # Track min/max during stick calibration
         if self.stick_calibrating:
-            axes = {
-                'left_x': left_stick_x, 'left_y': left_stick_y,
-                'right_x': right_stick_x, 'right_y': right_stick_y,
-            }
-            for axis, val in axes.items():
-                if self.stick_cal_min.get(axis) is None or val < self.stick_cal_min[axis]:
-                    self.stick_cal_min[axis] = val
-                if self.stick_cal_max.get(axis) is None or val > self.stick_cal_max[axis]:
-                    self.stick_cal_max[axis] = val
+            with self._cal_lock:
+                axes = {
+                    'left_x': left_stick_x, 'left_y': left_stick_y,
+                    'right_x': right_stick_x, 'right_y': right_stick_y,
+                }
+                for axis, val in axes.items():
+                    if self.stick_cal_min.get(axis) is None or val < self.stick_cal_min[axis]:
+                        self.stick_cal_min[axis] = val
+                    if self.stick_cal_max.get(axis) is None or val > self.stick_cal_max[axis]:
+                        self.stick_cal_max[axis] = val
 
-            # Track octagon sectors per stick
-            cal = self.calibration
-            for side, raw_x, raw_y in [('left', left_stick_x, left_stick_y),
-                                        ('right', right_stick_x, right_stick_y)]:
-                cx = cal[f'stick_{side}_center_x']
-                cy = cal[f'stick_{side}_center_y']
-                dx = raw_x - cx
-                dy = raw_y - cy
-                dist = math.hypot(dx, dy)
-                if dist > 0:
-                    angle_deg = math.degrees(math.atan2(dy, dx)) % 360
-                    sector = round(angle_deg / 45) % 8
-                    if dist > self.stick_cal_octagon_dists[side][sector]:
-                        self.stick_cal_octagon_dists[side][sector] = dist
-                        self.stick_cal_octagon_points[side][sector] = (raw_x, raw_y)
+                # Track octagon sectors per stick
+                cal = self.calibration
+                for side, raw_x, raw_y in [('left', left_stick_x, left_stick_y),
+                                            ('right', right_stick_x, right_stick_y)]:
+                    cx = cal[f'stick_{side}_center_x']
+                    cy = cal[f'stick_{side}_center_y']
+                    dx = raw_x - cx
+                    dy = raw_y - cy
+                    dist = math.hypot(dx, dy)
+                    if dist > 0:
+                        angle_deg = math.degrees(math.atan2(dy, dx)) % 360
+                        sector = round(angle_deg / 45) % 8
+                        if dist > self.stick_cal_octagon_dists[side][sector]:
+                            self.stick_cal_octagon_dists[side][sector] = dist
+                            self.stick_cal_octagon_points[side][sector] = (raw_x, raw_y)
 
         # Normalize stick values (-1 to 1) using calibration
         cal = self.calibration
-        left_x_norm = max(-1.0, min(1.0, (left_stick_x - cal['stick_left_center_x']) / max(cal['stick_left_range_x'], 1)))
-        left_y_norm = max(-1.0, min(1.0, (left_stick_y - cal['stick_left_center_y']) / max(cal['stick_left_range_y'], 1)))
-        right_x_norm = max(-1.0, min(1.0, (right_stick_x - cal['stick_right_center_x']) / max(cal['stick_right_range_x'], 1)))
-        right_y_norm = max(-1.0, min(1.0, (right_stick_y - cal['stick_right_center_y']) / max(cal['stick_right_range_y'], 1)))
+        norm = self._normalize
+        left_x_norm = norm(left_stick_x, cal['stick_left_center_x'], cal['stick_left_range_x'])
+        left_y_norm = norm(left_stick_y, cal['stick_left_center_y'], cal['stick_left_range_y'])
+        right_x_norm = norm(right_stick_x, cal['stick_right_center_x'], cal['stick_right_range_x'])
+        right_y_norm = norm(right_stick_y, cal['stick_right_center_y'], cal['stick_right_range_y'])
         
         # Process buttons first (most important for responsiveness)
         button_states = {}
@@ -591,7 +615,12 @@ class GCControllerEnabler:
         
         # Update dot position
         canvas.coords(dot, x_pos-3, y_pos-3, x_pos+3, y_pos+3)
-    
+
+    @staticmethod
+    def _normalize(raw, center, range_val):
+        """Normalize a raw stick value to [-1.0, 1.0]."""
+        return max(-1.0, min(1.0, (raw - center) / max(range_val, 1)))
+
     def _init_stick_canvas(self, canvas, dot, side):
         """Draw dashed circle outline and octagon on a stick canvas, raise dot to top"""
         canvas.create_oval(10, 10, 70, 70, outline='#999999', dash=(3, 3), tag='circle')
@@ -651,13 +680,14 @@ class GCControllerEnabler:
         center = 40
         radius = 30
 
+        norm = self._normalize
         coords = []
         for i in range(8):
             dist = self.stick_cal_octagon_dists[side][i]
             if dist > 0:
                 raw_x, raw_y = self.stick_cal_octagon_points[side][i]
-                x_norm = max(-1.0, min(1.0, (raw_x - cx) / rx))
-                y_norm = max(-1.0, min(1.0, (raw_y - cy) / ry))
+                x_norm = norm(raw_x, cx, rx)
+                y_norm = norm(raw_y, cy, ry)
             else:
                 # No data yet for this sector — draw at center (zero)
                 x_norm = 0.0
@@ -698,8 +728,8 @@ class GCControllerEnabler:
             canvas.delete('bump_line')
             canvas.delete('max_line')
 
-            bump = cal[f'{side}_bump']
-            max_val = cal[f'{side}_max']
+            bump = cal[f'trigger_{side}_bump']
+            max_val = cal[f'trigger_{side}_max']
 
             bump_x = (bump / 255.0) * w
             max_x = (max_val / 255.0) * w
@@ -786,33 +816,12 @@ class GCControllerEnabler:
             self.gamepad.left_joystick(x_value=left_x_scaled, y_value=left_y_scaled)
             self.gamepad.right_joystick(x_value=right_x_scaled, y_value=right_y_scaled)
             
-            # Process analog triggers with calibration (cache calibration values)
-            if not hasattr(self, '_cached_calibration'):
-                self._cached_calibration = self.calibration.copy()
-            
+            # Process analog triggers with calibration
             left_trigger_calibrated = self.calibrate_trigger_fast(left_trigger, 'left')
             right_trigger_calibrated = self.calibrate_trigger_fast(right_trigger, 'right')
-            
-            # Map buttons
-            button_mapping = {
-                'A': GamepadButton.A,
-                'B': GamepadButton.B,
-                'X': GamepadButton.X,
-                'Y': GamepadButton.Y,
-                'Z': GamepadButton.RIGHT_SHOULDER,
-                'ZL': GamepadButton.LEFT_SHOULDER,
-                'Start/Pause': GamepadButton.START,
-                'Home': GamepadButton.GUIDE,
-                'Capture': GamepadButton.BACK,
-                'Chat': GamepadButton.BACK,
-                'Dpad Up': GamepadButton.DPAD_UP,
-                'Dpad Down': GamepadButton.DPAD_DOWN,
-                'Dpad Left': GamepadButton.DPAD_LEFT,
-                'Dpad Right': GamepadButton.DPAD_RIGHT,
-            }
-            
+
             # Update button states
-            for button_name, xbox_button in button_mapping.items():
+            for button_name, xbox_button in self.BUTTON_MAPPING.items():
                 pressed = button_states.get(button_name, False)
                 if pressed:
                     self.gamepad.press_button(xbox_button)
@@ -841,15 +850,15 @@ class GCControllerEnabler:
     
     def calibrate_trigger_fast(self, raw_value: int, side: str) -> int:
         """Fast trigger calibration using cached values"""
-        base = self._cached_calibration[f'{side}_base']
-        bump = self._cached_calibration[f'{side}_bump']
-        max_val = self._cached_calibration[f'{side}_max']
-        
+        base = self._cached_calibration[f'trigger_{side}_base']
+        bump = self._cached_calibration[f'trigger_{side}_bump']
+        max_val = self._cached_calibration[f'trigger_{side}_max']
+
         calibrated = raw_value - base
         if calibrated < 0:
             calibrated = 0
-        
-        if self._cached_calibration['bump_100_percent']:
+
+        if self._cached_calibration['trigger_bump_100_percent']:
             range_val = bump - base
         else:
             range_val = max_val - base
@@ -869,10 +878,11 @@ class GCControllerEnabler:
 
     def start_stick_calibration(self):
         """Begin stick calibration - start tracking extremes"""
-        self.stick_cal_min = {'left_x': None, 'left_y': None, 'right_x': None, 'right_y': None}
-        self.stick_cal_max = {'left_x': None, 'left_y': None, 'right_x': None, 'right_y': None}
-        self.stick_cal_octagon_points = {'left': [(0, 0)] * 8, 'right': [(0, 0)] * 8}
-        self.stick_cal_octagon_dists = {'left': [0.0] * 8, 'right': [0.0] * 8}
+        with self._cal_lock:
+            self.stick_cal_min = {'left_x': None, 'left_y': None, 'right_x': None, 'right_y': None}
+            self.stick_cal_max = {'left_x': None, 'left_y': None, 'right_x': None, 'right_y': None}
+            self.stick_cal_octagon_points = {'left': [(0, 0)] * 8, 'right': [(0, 0)] * 8}
+            self.stick_cal_octagon_dists = {'left': [0.0] * 8, 'right': [0.0] * 8}
         self.stick_calibrating = True
         self.stick_cal_btn.config(text="Finish Calibration")
         self.stick_cal_status.config(text="Move sticks to all extremes...")
@@ -888,14 +898,21 @@ class GCControllerEnabler:
             'right_y': ('stick_right_center_y', 'stick_right_range_y'),
         }
 
+        with self._cal_lock:
+            cal_min = {k: v for k, v in self.stick_cal_min.items()}
+            cal_max = {k: v for k, v in self.stick_cal_max.items()}
+            octagon_points = {s: list(pts) for s, pts in self.stick_cal_octagon_points.items()}
+            octagon_dists = {s: list(dists) for s, dists in self.stick_cal_octagon_dists.items()}
+
         for axis, (center_key, range_key) in axis_map.items():
-            mn = self.stick_cal_min.get(axis)
-            mx = self.stick_cal_max.get(axis)
+            mn = cal_min.get(axis)
+            mx = cal_max.get(axis)
             if mn is not None and mx is not None and mx > mn:
                 self.calibration[center_key] = (mn + mx) / 2.0
                 self.calibration[range_key] = (mx - mn) / 2.0
 
         # Compute normalized octagon points for each stick
+        norm = self._normalize
         cal = self.calibration
         for side in ('left', 'right'):
             cx = cal[f'stick_{side}_center_x']
@@ -905,11 +922,11 @@ class GCControllerEnabler:
 
             octagon = []
             for i in range(8):
-                raw_x, raw_y = self.stick_cal_octagon_points[side][i]
-                dist = self.stick_cal_octagon_dists[side][i]
+                raw_x, raw_y = octagon_points[side][i]
+                dist = octagon_dists[side][i]
                 if dist > 0:
-                    x_norm = max(-1.0, min(1.0, (raw_x - cx) / rx))
-                    y_norm = max(-1.0, min(1.0, (raw_y - cy) / ry))
+                    x_norm = norm(raw_x, cx, rx)
+                    y_norm = norm(raw_y, cy, ry)
                 else:
                     # No data for this sector — use default regular octagon vertex
                     angle = math.radians(i * 45)
@@ -942,32 +959,32 @@ class GCControllerEnabler:
             self.trigger_cal_status.config(text="Release both triggers, then click Record Unpressed")
         elif step == 1:
             # Record both bases
-            self.calibration['left_base'] = float(self.trigger_cal_last_left)
-            self.calibration['right_base'] = float(self.trigger_cal_last_right)
+            self.calibration['trigger_left_base'] = float(self.trigger_cal_last_left)
+            self.calibration['trigger_right_base'] = float(self.trigger_cal_last_right)
             self.trigger_cal_step = 2
             self.trigger_cal_btn.config(text="Record Left Bump")
             self.trigger_cal_status.config(text="Push LEFT trigger to analog max (before click)")
         elif step == 2:
             # Record left bump
-            self.calibration['left_bump'] = float(self.trigger_cal_last_left)
+            self.calibration['trigger_left_bump'] = float(self.trigger_cal_last_left)
             self.trigger_cal_step = 3
             self.trigger_cal_btn.config(text="Record Left Max")
             self.trigger_cal_status.config(text="Fully press LEFT trigger past the bump")
         elif step == 3:
             # Record left max
-            self.calibration['left_max'] = float(self.trigger_cal_last_left)
+            self.calibration['trigger_left_max'] = float(self.trigger_cal_last_left)
             self.trigger_cal_step = 4
             self.trigger_cal_btn.config(text="Record Right Bump")
             self.trigger_cal_status.config(text="Push RIGHT trigger to analog max (before click)")
         elif step == 4:
             # Record right bump
-            self.calibration['right_bump'] = float(self.trigger_cal_last_right)
+            self.calibration['trigger_right_bump'] = float(self.trigger_cal_last_right)
             self.trigger_cal_step = 5
             self.trigger_cal_btn.config(text="Record Right Max")
             self.trigger_cal_status.config(text="Fully press RIGHT trigger past the bump")
         elif step == 5:
             # Record right max, finish wizard
-            self.calibration['right_max'] = float(self.trigger_cal_last_right)
+            self.calibration['trigger_right_max'] = float(self.trigger_cal_last_right)
             self._cached_calibration = self.calibration.copy()
             self._draw_trigger_markers()
             self.trigger_cal_step = 0
@@ -976,7 +993,7 @@ class GCControllerEnabler:
 
     def update_calibration_from_ui(self):
         """Update calibration values from UI"""
-        self.calibration['bump_100_percent'] = self.trigger_mode_var.get()
+        self.calibration['trigger_bump_100_percent'] = self.trigger_mode_var.get()
         self.calibration['emulation_mode'] = self.emu_mode_var.get()
         self.calibration['auto_connect'] = self.auto_connect_var.get()
 
@@ -1002,6 +1019,23 @@ class GCControllerEnabler:
             if os.path.exists(settings_file):
                 with open(settings_file, 'r') as f:
                     saved_settings = json.load(f)
+
+                    # Migrate old key names to new trigger_ prefixed names
+                    key_migration = {
+                        'left_base': 'trigger_left_base',
+                        'left_bump': 'trigger_left_bump',
+                        'left_max': 'trigger_left_max',
+                        'right_base': 'trigger_right_base',
+                        'right_bump': 'trigger_right_bump',
+                        'right_max': 'trigger_right_max',
+                        'bump_100_percent': 'trigger_bump_100_percent',
+                    }
+                    for old_key, new_key in key_migration.items():
+                        if old_key in saved_settings and new_key not in saved_settings:
+                            saved_settings[new_key] = saved_settings.pop(old_key)
+                        elif old_key in saved_settings:
+                            del saved_settings[old_key]
+
                     self.calibration.update(saved_settings)
         except Exception as e:
             print(f"Failed to load settings: {e}")

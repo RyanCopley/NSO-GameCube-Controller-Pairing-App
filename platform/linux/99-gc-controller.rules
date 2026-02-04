@@ -1,7 +1,7 @@
 # Nintendo GameCube Controller Adapter (NSO)
-# Allow non-root access for HID and USB communication
-SUBSYSTEM=="usb", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="2073", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="2073", MODE="0666"
+# Allow access for HID and USB communication (users in "input" group)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="2073", GROUP="input", MODE="0660"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="2073", GROUP="input", MODE="0660"
 
-# Allow non-root access to uinput for virtual gamepad creation
-KERNEL=="uinput", MODE="0666", OPTIONS+="static_node=uinput"
+# Allow access to uinput for virtual gamepad creation (users in "input" group)
+KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"

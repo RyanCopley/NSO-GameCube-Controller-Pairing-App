@@ -7,6 +7,7 @@ Provides a unified interface for Xbox 360 controller emulation across platforms:
 - macOS: Not supported
 """
 
+import os
 import sys
 from abc import ABC, abstractmethod
 from enum import Enum, auto
@@ -288,29 +289,6 @@ class LinuxGamepad(VirtualGamepad):
             pass
 
 
-class MacOSGamepad(VirtualGamepad):
-    """macOS stub - virtual gamepad emulation is not supported on macOS."""
-
-    def __init__(self):
-        raise RuntimeError(
-            "Xbox 360 controller emulation is not supported on macOS.\n"
-            "macOS does not allow user-space creation of virtual HID game controllers.\n"
-            "Consider using a hardware adapter or alternative input remapping tool."
-        )
-
-    # The following methods exist only to satisfy the ABC contract.
-    # They are unreachable since __init__ always raises.
-    def left_joystick(self, x_value, y_value): ...
-    def right_joystick(self, x_value, y_value): ...
-    def left_trigger(self, value): ...
-    def right_trigger(self, value): ...
-    def press_button(self, button): ...
-    def release_button(self, button): ...
-    def update(self): ...
-    def reset(self): ...
-    def close(self): ...
-
-
 def is_emulation_available() -> bool:
     """Check whether virtual gamepad emulation is available on this platform."""
     if sys.platform == "win32":
@@ -322,7 +300,7 @@ def is_emulation_available() -> bool:
     elif sys.platform == "linux":
         try:
             import evdev
-            return True
+            return os.access('/dev/uinput', os.W_OK)
         except ImportError:
             return False
     else:
@@ -359,6 +337,10 @@ def create_gamepad() -> VirtualGamepad:
     elif sys.platform == "linux":
         return LinuxGamepad()
     elif sys.platform == "darwin":
-        return MacOSGamepad()
+        raise RuntimeError(
+            "Xbox 360 controller emulation is not supported on macOS.\n"
+            "macOS does not allow user-space creation of virtual HID game controllers.\n"
+            "Consider using a hardware adapter or alternative input remapping tool."
+        )
     else:
         raise RuntimeError(f"Virtual gamepad emulation is not supported on {sys.platform}.")

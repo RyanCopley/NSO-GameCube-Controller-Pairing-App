@@ -31,12 +31,13 @@ pip install -r requirements.txt
 
 ### Linux
 - Install libusb: `sudo apt install libusb-1.0-0-dev` (Ubuntu/Debian) or `sudo dnf install libusb1-devel` (Fedora)
+- Add your user to the `input` group: `sudo usermod -aG input $USER`
 - Install udev rules for controller and uinput access:
 ```bash
 sudo cp platform/linux/99-gc-controller.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
-- You may need to log out and back in for uinput group permissions to take effect
+- Log out and back in for group changes to take effect
 
 ### macOS
 - Install libusb: `brew install libusb`
@@ -104,16 +105,18 @@ platform/
 
 ### Emulation Not Working
 - **Windows**: Install [ViGEmBus](https://github.com/nefarius/ViGEmBus) and `pip install vgamepad`
-- **Linux**: Install evdev (`pip install evdev`) and ensure `/dev/uinput` is accessible via udev rules
+- **Linux**: Install evdev (`pip install evdev`), ensure your user is in the `input` group, and install the udev rules
 - **macOS**: Not supported
 
 ### Permission Errors
 - **Windows**: HID access may require administrator privileges
-- **Linux**: Install the udev rules and reload:
+- **Linux**: Add your user to `input` group and install udev rules:
   ```bash
+  sudo usermod -aG input $USER
   sudo cp platform/linux/99-gc-controller.rules /etc/udev/rules.d/
   sudo udevadm control --reload-rules
   ```
+  Then log out and back in.
 
 ## License
 
