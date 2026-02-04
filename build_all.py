@@ -31,13 +31,13 @@ def build_executable():
     
     if system == "windows":
         output_dir = "dist/windows"
-        script_name = "build_windows.bat"
+        script_name = "./platform/windows/build.bat"
     elif system == "darwin":
         output_dir = "dist/macos"
-        script_name = "./build_macos.sh"
+        script_name = "./platform/macos/build.sh"
     elif system == "linux":
         output_dir = "dist/linux"
-        script_name = "./build_linux.sh"
+        script_name = "./platform/linux/build.sh"
     else:
         print(f"Unsupported platform: {system}")
         return False

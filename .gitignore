@@ -341,6 +341,10 @@ paket-files/
 **/__pycache__/
 *.pyc
 
+# PyInstaller build artifacts
+dist/
+build/
+
 # Cake - Uncomment if you are using it
 #tools/**
 #!tools/packages.config
