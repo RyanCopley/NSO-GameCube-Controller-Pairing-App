@@ -51,14 +51,24 @@ hiddenimports = [
     'hid',
     'usb.core',
     'usb.util',
-    'vgamepad',
-    'vgamepad.win',
-    'vgamepad.win.vigem_client',
-    'vgamepad.win.virtual_gamepad',
+    'virtual_gamepad',
     'tkinter',
     'tkinter.ttk',
     '_tkinter',
 ]
+
+# Platform-conditional hidden imports
+if sys.platform == "win32":
+    hiddenimports += [
+        'vgamepad',
+        'vgamepad.win',
+        'vgamepad.win.vigem_client',
+        'vgamepad.win.virtual_gamepad',
+    ]
+elif sys.platform == "linux":
+    hiddenimports += [
+        'evdev',
+    ]
 
 a = Analysis(
     ['gc_controller_enabler.py'],

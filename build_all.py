@@ -99,7 +99,12 @@ def check_dependencies():
     
     # Check main dependencies
     required_packages = ["tkinter", "threading", "json"]
-    optional_packages = ["hid", "usb", "vgamepad"]
+    if platform.system().lower() == "windows":
+        optional_packages = ["hid", "usb", "vgamepad"]
+    elif platform.system().lower() == "linux":
+        optional_packages = ["hid", "usb", "evdev"]
+    else:
+        optional_packages = ["hid", "usb"]
     
     for package in required_packages:
         try:

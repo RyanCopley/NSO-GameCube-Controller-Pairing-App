@@ -7,7 +7,7 @@ A Python/Tkinter implementation of the GameCube Controller Enabler tool that all
 
 - **USB Initialization**: Sends required initialization commands to GameCube controllers
 - **HID Communication**: Reads controller input via HID interface
-- **Xbox 360 Emulation**: Maps GameCube inputs to Xbox 360 controller using vgamepad
+- **Xbox 360 Emulation**: Maps GameCube inputs to Xbox 360 controller (Windows via vgamepad, Linux via evdev/uinput)
 - **Analog Trigger Calibration**: Configurable trigger ranges for different controller variations
 - **Visual Controller Display**: Real-time visualization of button presses, analog sticks, and triggers
 - **Settings Persistence**: Save and load calibration settings
@@ -15,7 +15,9 @@ A Python/Tkinter implementation of the GameCube Controller Enabler tool that all
 ## Requirements
 
 - Python 3.7 or higher
-- Windows (for Xbox 360 emulation via ViGEmBus)
+- **Windows**: ViGEmBus driver for Xbox 360 emulation
+- **Linux**: python-evdev and uinput access for Xbox 360 emulation
+- **macOS**: Controller reading works, but Xbox 360 emulation is not supported
 
 ## Installation
 
@@ -24,9 +26,22 @@ A Python/Tkinter implementation of the GameCube Controller Enabler tool that all
 pip install -r requirements.txt
 ```
 
-2. For Xbox 360 emulation, install ViGEmBus driver:
-   - Download from: https://github.com/nefarius/ViGEmBus
-   - Install the driver according to their instructions
+2. Platform-specific setup:
+
+### Windows
+- Install ViGEmBus driver: https://github.com/nefarius/ViGEmBus
+
+### Linux
+- Install udev rules for controller and uinput access:
+```bash
+sudo cp 99-gc-controller.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+- Install libusb: `sudo apt-get install libusb-1.0-0-dev` (Ubuntu/Debian) or `sudo dnf install libusb1-devel` (Fedora)
+- You may need to log out and back in for the uinput group permissions to take effect
+
+### macOS
+- Xbox 360 controller emulation is not available on macOS (OS limitation)
 
 ## Usage
 
@@ -76,23 +91,24 @@ To calibrate:
 
 - **hid**: HID device communication
 - **pyusb**: USB device initialization
-- **vgamepad**: Xbox 360 controller emulation (optional)
+- **vgamepad**: Xbox 360 controller emulation (Windows only, optional)
+- **evdev**: Xbox 360 controller emulation (Linux only, optional)
 
 ## Troubleshooting
 
 ### Controller Not Detected
 - Ensure GameCube controller adapter is properly connected
-- Check that the controller is recognized by Windows Device Manager
+- On Windows, check Device Manager; on Linux, check `lsusb`
 - Verify Vendor ID (0x057e) and Product ID (0x2073)
 
 ### Emulation Not Working
-- Install ViGEmBus driver from Nefarius
-- Ensure vgamepad is installed: `pip install vgamepad`
-- Run as administrator if needed
+- **Windows**: Install ViGEmBus driver from Nefarius and `pip install vgamepad`
+- **Linux**: Install evdev (`pip install evdev`) and ensure `/dev/uinput` is accessible via udev rules
+- **macOS**: Xbox 360 emulation is not supported
 
 ### Permission Errors
 - On Windows, HID access may require administrator privileges
-- Try running the application as administrator
+- On Linux, install the udev rules file and reload: `sudo cp 99-gc-controller.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules`
 
 ## Differences from C# Version
 

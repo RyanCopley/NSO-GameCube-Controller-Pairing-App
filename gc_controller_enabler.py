@@ -30,14 +30,14 @@ except ImportError as e:
     print("Install with: pip install hidapi pyusb")
     sys.exit(1)
 
-# Try to import vgamepad for Xbox 360 emulation (optional)
-try:
-    import vgamepad as vg
-    EMULATION_AVAILABLE = True
-except ImportError:
-    EMULATION_AVAILABLE = False
-    print("vgamepad not available - Xbox 360 emulation disabled")
-    print("Install with: pip install vgamepad")
+# Virtual gamepad platform abstraction (Xbox 360 emulation)
+from virtual_gamepad import (
+    GamepadButton, VirtualGamepad, create_gamepad,
+    is_emulation_available, get_emulation_unavailable_reason,
+)
+EMULATION_AVAILABLE = is_emulation_available()
+if not EMULATION_AVAILABLE:
+    print("Xbox 360 emulation unavailable: " + get_emulation_unavailable_reason())
 
 
 class ButtonInfo:
@@ -64,7 +64,7 @@ class GCControllerEnabler:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("GameCube Controller Enabler")
-        self.root.geometry("800x600")
+        self.root.geometry("800x680")
         self.root.resizable(False, False)
         
         # Controller state
@@ -77,7 +77,7 @@ class GCControllerEnabler:
         self.stop_emulation = threading.Event()
         
         # Xbox 360 emulation
-        self.gamepad: Optional[vg.VX360Gamepad] = None
+        self.gamepad: Optional[VirtualGamepad] = None
         
         # Button mapping for GameCube controller
         self.buttons = [
@@ -104,20 +104,34 @@ class GCControllerEnabler:
         # Calibration values
         self.calibration = {
             'left_base': 32.0,
-            'left_bump': 190.0, 
+            'left_bump': 190.0,
             'left_max': 230.0,
             'right_base': 32.0,
             'right_bump': 190.0,
             'right_max': 230.0,
             'bump_100_percent': True,
-            'emulation_mode': 'xbox360'
+            'emulation_mode': 'xbox360',
+            'stick_left_center_x': 2048, 'stick_left_range_x': 2048,
+            'stick_left_center_y': 2048, 'stick_left_range_y': 2048,
+            'stick_right_center_x': 2048, 'stick_right_range_x': 2048,
+            'stick_right_center_y': 2048, 'stick_right_range_y': 2048,
+            'auto_connect': False,
         }
-        
+
+        # Stick calibration state
+        self.stick_calibrating = False
+        self.stick_cal_min = {}
+        self.stick_cal_max = {}
+
         self.load_settings()
         self.setup_ui()
         
         # Handle window closing
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # Auto-connect if enabled
+        if self.calibration['auto_connect']:
+            self.root.after(100, self.auto_connect_and_emulate)
     
     def setup_ui(self):
         """Create the user interface"""
@@ -132,20 +146,24 @@ class GCControllerEnabler:
         self.connect_btn = ttk.Button(connection_frame, text="Connect", command=self.connect_controller)
         self.connect_btn.grid(row=0, column=0, padx=(0, 10))
         
-        self.emulate_btn = ttk.Button(connection_frame, text="Emulate Xbox 360", 
+        self.emulate_btn = ttk.Button(connection_frame, text="Emulate Xbox 360",
                                      command=self.start_emulation, state='disabled')
         self.emulate_btn.grid(row=0, column=1)
-        
+
         if not EMULATION_AVAILABLE:
             self.emulate_btn.config(state='disabled', text="Emulation Unavailable")
-        
+
+        self.auto_connect_var = tk.BooleanVar(value=self.calibration['auto_connect'])
+        ttk.Checkbutton(connection_frame, text="Connect and Emulate at startup",
+                        variable=self.auto_connect_var).grid(row=0, column=2, padx=(10, 0))
+
         # Progress bar
         self.progress = ttk.Progressbar(connection_frame, length=300, mode='determinate')
-        self.progress.grid(row=1, column=0, columnspan=2, pady=(10, 0), sticky=(tk.W, tk.E))
-        
+        self.progress.grid(row=1, column=0, columnspan=3, pady=(10, 0), sticky=(tk.W, tk.E))
+
         # Status label
         self.status_label = ttk.Label(connection_frame, text="Ready to connect")
-        self.status_label.grid(row=2, column=0, columnspan=2, pady=(5, 0))
+        self.status_label.grid(row=2, column=0, columnspan=3, pady=(5, 0))
         
         # Controller visualization
         controller_frame = ttk.LabelFrame(main_frame, text="Controller Input", padding="10")
@@ -198,84 +216,95 @@ class GCControllerEnabler:
         self.right_stick_canvas = tk.Canvas(right_stick_frame, width=80, height=80, bg='lightgray')
         self.right_stick_canvas.grid(row=1, column=0)
         self.right_stick_dot = self.right_stick_canvas.create_oval(37, 37, 43, 43, fill='red')
+
+        # Stick calibration (inside Analog Sticks frame)
+        stick_cal_frame = ttk.LabelFrame(sticks_frame, text="Calibration", padding="5")
+        stick_cal_frame.grid(row=1, column=0, columnspan=2, pady=(10, 0), sticky=(tk.W, tk.E))
+
+        self.stick_cal_btn = ttk.Button(stick_cal_frame, text="Calibrate Sticks",
+                                        command=self.toggle_stick_calibration)
+        self.stick_cal_btn.grid(row=0, column=0, padx=5, pady=2)
+
+        self.stick_cal_status = ttk.Label(stick_cal_frame, text="Using saved calibration")
+        self.stick_cal_status.grid(row=0, column=1, padx=5, pady=2)
         
-        # Triggers
-        triggers_frame = ttk.LabelFrame(controller_frame, text="Analog Triggers")
-        triggers_frame.grid(row=2, column=0, pady=(10, 0), sticky=(tk.W, tk.E))
-        
+        # Analog triggers section
+        calibration_frame = ttk.LabelFrame(main_frame, text="Analog Triggers", padding="10")
+        calibration_frame.grid(row=1, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
+
+        # Trigger visualizers
+        triggers_frame = ttk.Frame(calibration_frame)
+        triggers_frame.grid(row=0, column=0, sticky=(tk.W, tk.E))
+
         ttk.Label(triggers_frame, text="Left Trigger").grid(row=0, column=0)
         self.left_trigger_bar = ttk.Progressbar(triggers_frame, length=150, mode='determinate')
         self.left_trigger_bar.grid(row=0, column=1, padx=(5, 10))
         self.left_trigger_label = ttk.Label(triggers_frame, text="0")
         self.left_trigger_label.grid(row=0, column=2)
-        
+
         ttk.Label(triggers_frame, text="Right Trigger").grid(row=1, column=0)
         self.right_trigger_bar = ttk.Progressbar(triggers_frame, length=150, mode='determinate')
         self.right_trigger_bar.grid(row=1, column=1, padx=(5, 10))
         self.right_trigger_label = ttk.Label(triggers_frame, text="0")
         self.right_trigger_label.grid(row=1, column=2)
-        
-        # Calibration section
-        calibration_frame = ttk.LabelFrame(main_frame, text="Calibration", padding="10")
-        calibration_frame.grid(row=1, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
+
         # Trigger calibration
-        cal_frame = ttk.Frame(calibration_frame)
-        cal_frame.grid(row=0, column=0, sticky=(tk.W, tk.E))
-        
+        cal_frame = ttk.LabelFrame(calibration_frame, text="Calibration", padding="5")
+        cal_frame.grid(row=1, column=0, pady=(10, 0), sticky=(tk.W, tk.E))
+
         # Left trigger calibration
         ttk.Label(cal_frame, text="Left Trigger").grid(row=0, column=0, columnspan=3, pady=(0, 5))
-        
+
         ttk.Label(cal_frame, text="Base:").grid(row=1, column=0, sticky=tk.W)
         self.left_base_var = tk.StringVar(value=str(self.calibration['left_base']))
         ttk.Entry(cal_frame, textvariable=self.left_base_var, width=8).grid(row=1, column=1, padx=5)
-        
+
         ttk.Label(cal_frame, text="Bump:").grid(row=2, column=0, sticky=tk.W)
         self.left_bump_var = tk.StringVar(value=str(self.calibration['left_bump']))
         ttk.Entry(cal_frame, textvariable=self.left_bump_var, width=8).grid(row=2, column=1, padx=5)
-        
+
         ttk.Label(cal_frame, text="Max:").grid(row=3, column=0, sticky=tk.W)
         self.left_max_var = tk.StringVar(value=str(self.calibration['left_max']))
         ttk.Entry(cal_frame, textvariable=self.left_max_var, width=8).grid(row=3, column=1, padx=5)
-        
+
         # Right trigger calibration
         ttk.Label(cal_frame, text="Right Trigger").grid(row=0, column=3, columnspan=3, pady=(0, 5))
-        
+
         ttk.Label(cal_frame, text="Base:").grid(row=1, column=3, sticky=tk.W, padx=(20, 0))
         self.right_base_var = tk.StringVar(value=str(self.calibration['right_base']))
         ttk.Entry(cal_frame, textvariable=self.right_base_var, width=8).grid(row=1, column=4, padx=5)
-        
+
         ttk.Label(cal_frame, text="Bump:").grid(row=2, column=3, sticky=tk.W, padx=(20, 0))
         self.right_bump_var = tk.StringVar(value=str(self.calibration['right_bump']))
         ttk.Entry(cal_frame, textvariable=self.right_bump_var, width=8).grid(row=2, column=4, padx=5)
-        
+
         ttk.Label(cal_frame, text="Max:").grid(row=3, column=3, sticky=tk.W, padx=(20, 0))
         self.right_max_var = tk.StringVar(value=str(self.calibration['right_max']))
         ttk.Entry(cal_frame, textvariable=self.right_max_var, width=8).grid(row=3, column=4, padx=5)
-        
+
         # Trigger mode
         mode_frame = ttk.LabelFrame(calibration_frame, text="Trigger Mode", padding="5")
-        mode_frame.grid(row=1, column=0, pady=(10, 0), sticky=(tk.W, tk.E))
-        
+        mode_frame.grid(row=2, column=0, pady=(10, 0), sticky=(tk.W, tk.E))
+
         self.trigger_mode_var = tk.BooleanVar(value=self.calibration['bump_100_percent'])
-        ttk.Radiobutton(mode_frame, text="100% at bump", 
+        ttk.Radiobutton(mode_frame, text="100% at bump",
                        variable=self.trigger_mode_var, value=True).grid(row=0, column=0, sticky=tk.W)
-        ttk.Radiobutton(mode_frame, text="100% at press", 
+        ttk.Radiobutton(mode_frame, text="100% at press",
                        variable=self.trigger_mode_var, value=False).grid(row=1, column=0, sticky=tk.W)
-        
+
         # Emulation mode
         emu_frame = ttk.LabelFrame(calibration_frame, text="Emulation Mode", padding="5")
-        emu_frame.grid(row=2, column=0, pady=(10, 0), sticky=(tk.W, tk.E))
-        
+        emu_frame.grid(row=3, column=0, pady=(10, 0), sticky=(tk.W, tk.E))
+
         self.emu_mode_var = tk.StringVar(value=self.calibration['emulation_mode'])
-        ttk.Radiobutton(emu_frame, text="Xbox 360", 
+        ttk.Radiobutton(emu_frame, text="Xbox 360",
                        variable=self.emu_mode_var, value='xbox360').grid(row=0, column=0, sticky=tk.W)
-        ttk.Radiobutton(emu_frame, text="DualShock (Not implemented)", 
+        ttk.Radiobutton(emu_frame, text="DualShock (Not implemented)",
                        variable=self.emu_mode_var, value='dualshock', state='disabled').grid(row=1, column=0, sticky=tk.W)
-        
+
         # Save settings button
-        ttk.Button(calibration_frame, text="Save Settings", 
-                  command=self.save_settings).grid(row=3, column=0, pady=(10, 0))
+        ttk.Button(calibration_frame, text="Save Settings",
+                  command=self.save_settings).grid(row=4, column=0, pady=(10, 0))
         
         # Configure grid weights
         main_frame.columnconfigure(0, weight=1)
@@ -356,6 +385,12 @@ class GCControllerEnabler:
             self.update_status(f"HID connection failed: {e}")
             return False
     
+    def auto_connect_and_emulate(self):
+        """Auto-connect and start emulation on startup"""
+        self.connect_controller()
+        if self.is_reading and EMULATION_AVAILABLE:
+            self.start_emulation()
+
     def connect_controller(self):
         """Connect to GameCube controller"""
         if self.is_reading:
@@ -456,12 +491,25 @@ class GCControllerEnabler:
         left_stick_y = ((data[7] >> 4) | (data[8] << 4))
         right_stick_x = data[9] | ((data[10] & 0x0F) << 8)
         right_stick_y = ((data[10] >> 4) | (data[11] << 4))
-        
-        # Normalize stick values (-1 to 1)
-        left_x_norm = (left_stick_x - 2048) / 2048.0
-        left_y_norm = (left_stick_y - 2048) / 2048.0
-        right_x_norm = (right_stick_x - 2048) / 2048.0
-        right_y_norm = (right_stick_y - 2048) / 2048.0
+
+        # Track min/max during stick calibration
+        if self.stick_calibrating:
+            axes = {
+                'left_x': left_stick_x, 'left_y': left_stick_y,
+                'right_x': right_stick_x, 'right_y': right_stick_y,
+            }
+            for axis, val in axes.items():
+                if self.stick_cal_min.get(axis) is None or val < self.stick_cal_min[axis]:
+                    self.stick_cal_min[axis] = val
+                if self.stick_cal_max.get(axis) is None or val > self.stick_cal_max[axis]:
+                    self.stick_cal_max[axis] = val
+
+        # Normalize stick values (-1 to 1) using calibration
+        cal = self.calibration
+        left_x_norm = max(-1.0, min(1.0, (left_stick_x - cal['stick_left_center_x']) / max(cal['stick_left_range_x'], 1)))
+        left_y_norm = max(-1.0, min(1.0, (left_stick_y - cal['stick_left_center_y']) / max(cal['stick_left_range_y'], 1)))
+        right_x_norm = max(-1.0, min(1.0, (right_stick_x - cal['stick_right_center_x']) / max(cal['stick_right_range_x'], 1)))
+        right_y_norm = max(-1.0, min(1.0, (right_stick_y - cal['stick_right_center_y']) / max(cal['stick_right_range_y'], 1)))
         
         # Process buttons first (most important for responsiveness)
         button_states = {}
@@ -537,7 +585,7 @@ class GCControllerEnabler:
     def start_emulation(self):
         """Start Xbox 360 controller emulation"""
         if not EMULATION_AVAILABLE:
-            messagebox.showerror("Error", "Xbox 360 emulation not available.\nInstall vgamepad: pip install vgamepad")
+            messagebox.showerror("Error", "Xbox 360 emulation not available.\n" + get_emulation_unavailable_reason())
             return
         
         if self.is_emulating:
@@ -545,7 +593,7 @@ class GCControllerEnabler:
             return
         
         try:
-            self.gamepad = vg.VX360Gamepad()
+            self.gamepad = create_gamepad()
             self.is_emulating = True
             self.stop_emulation.clear()
             
@@ -565,9 +613,7 @@ class GCControllerEnabler:
         
         if self.gamepad:
             try:
-                # Reset all inputs
-                self.gamepad.reset()
-                self.gamepad.update()
+                self.gamepad.close()
             except:
                 pass
             self.gamepad = None
@@ -604,20 +650,20 @@ class GCControllerEnabler:
             
             # Map buttons
             button_mapping = {
-                'A': vg.XUSB_BUTTON.XUSB_GAMEPAD_A,
-                'B': vg.XUSB_BUTTON.XUSB_GAMEPAD_B,  
-                'X': vg.XUSB_BUTTON.XUSB_GAMEPAD_X,
-                'Y': vg.XUSB_BUTTON.XUSB_GAMEPAD_Y,
-                'Z': vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER,
-                'ZL': vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER,
-                'Start/Pause': vg.XUSB_BUTTON.XUSB_GAMEPAD_START,  # Map to Xbox Start button for pause
-                'Home': vg.XUSB_BUTTON.XUSB_GAMEPAD_GUIDE,  # Home button maps to Xbox Guide
-                'Capture': vg.XUSB_BUTTON.XUSB_GAMEPAD_BACK,
-                'Chat': vg.XUSB_BUTTON.XUSB_GAMEPAD_BACK,
-                'Dpad Up': vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP,
-                'Dpad Down': vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN,
-                'Dpad Left': vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT,
-                'Dpad Right': vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT,
+                'A': GamepadButton.A,
+                'B': GamepadButton.B,
+                'X': GamepadButton.X,
+                'Y': GamepadButton.Y,
+                'Z': GamepadButton.RIGHT_SHOULDER,
+                'ZL': GamepadButton.LEFT_SHOULDER,
+                'Start/Pause': GamepadButton.START,
+                'Home': GamepadButton.GUIDE,
+                'Capture': GamepadButton.BACK,
+                'Chat': GamepadButton.BACK,
+                'Dpad Up': GamepadButton.DPAD_UP,
+                'Dpad Down': GamepadButton.DPAD_DOWN,
+                'Dpad Left': GamepadButton.DPAD_LEFT,
+                'Dpad Right': GamepadButton.DPAD_RIGHT,
             }
             
             # Update button states
@@ -693,6 +739,45 @@ class GCControllerEnabler:
         result = int((calibrated / range_val) * 255)
         return max(0, min(255, result))
     
+    def toggle_stick_calibration(self):
+        """Toggle stick calibration on/off"""
+        if self.stick_calibrating:
+            self.finish_stick_calibration()
+        else:
+            self.start_stick_calibration()
+
+    def start_stick_calibration(self):
+        """Begin stick calibration - start tracking extremes"""
+        self.stick_cal_min = {'left_x': None, 'left_y': None, 'right_x': None, 'right_y': None}
+        self.stick_cal_max = {'left_x': None, 'left_y': None, 'right_x': None, 'right_y': None}
+        self.stick_calibrating = True
+        self.stick_cal_btn.config(text="Finish Calibration")
+        self.stick_cal_status.config(text="Move sticks to all extremes...")
+
+    def finish_stick_calibration(self):
+        """Finish stick calibration - compute center and range"""
+        self.stick_calibrating = False
+
+        axis_map = {
+            'left_x': ('stick_left_center_x', 'stick_left_range_x'),
+            'left_y': ('stick_left_center_y', 'stick_left_range_y'),
+            'right_x': ('stick_right_center_x', 'stick_right_range_x'),
+            'right_y': ('stick_right_center_y', 'stick_right_range_y'),
+        }
+
+        for axis, (center_key, range_key) in axis_map.items():
+            mn = self.stick_cal_min.get(axis)
+            mx = self.stick_cal_max.get(axis)
+            if mn is not None and mx is not None and mx > mn:
+                self.calibration[center_key] = (mn + mx) / 2.0
+                self.calibration[range_key] = (mx - mn) / 2.0
+
+        # Update cached calibration
+        self._cached_calibration = self.calibration.copy()
+
+        self.stick_cal_btn.config(text="Calibrate Sticks")
+        self.stick_cal_status.config(text="Calibration complete!")
+
     def update_calibration_from_ui(self):
         """Update calibration values from UI"""
         try:
@@ -704,6 +789,7 @@ class GCControllerEnabler:
             self.calibration['right_max'] = float(self.right_max_var.get())
             self.calibration['bump_100_percent'] = self.trigger_mode_var.get()
             self.calibration['emulation_mode'] = self.emu_mode_var.get()
+            self.calibration['auto_connect'] = self.auto_connect_var.get()
             
             # Update cached calibration for performance
             self._cached_calibration = self.calibration.copy()

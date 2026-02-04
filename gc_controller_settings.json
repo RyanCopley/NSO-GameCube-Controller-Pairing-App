@@ -6,5 +6,14 @@
   "right_bump": 190.0,
   "right_max": 230.0,
   "bump_100_percent": true,
-  "emulation_mode": "xbox360"
+  "emulation_mode": "xbox360",
+  "stick_left_center_x": 2110.5,
+  "stick_left_range_x": 1229.5,
+  "stick_left_center_y": 2051.0,
+  "stick_left_range_y": 1251.0,
+  "stick_right_center_x": 2170.0,
+  "stick_right_range_x": 1139.0,
+  "stick_right_center_y": 2084.0,
+  "stick_right_range_y": 1108.0,
+  "auto_connect": true
 }

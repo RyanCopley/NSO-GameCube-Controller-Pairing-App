@@ -25,14 +25,16 @@ pyinstaller --onefile \
     --add-data "controller.png:." \
     --add-data "stick_left.png:." \
     --add-data "stick_right.png:." \
+    --hidden-import evdev \
+    --hidden-import virtual_gamepad \
     --distpath dist/linux \
     gc_controller_enabler.py
 
 echo "Build complete! Executable is in dist/linux/"
 echo ""
-echo "Note: On Linux, you may need to:"
+echo "Note: On Linux, you need to:"
 echo "1. Install libusb: sudo apt-get install libusb-1.0-0-dev (Ubuntu/Debian)"
 echo "   or: sudo dnf install libusb1-devel (Fedora)"
-echo "2. Add udev rules for GameCube controller access"
-echo "3. Run with sudo for USB access, or set up proper udev rules"
-echo "4. Xbox 360 emulation may require additional setup"
+echo "2. Copy udev rules: sudo cp 99-gc-controller.rules /etc/udev/rules.d/"
+echo "3. Reload udev rules: sudo udevadm control --reload-rules && sudo udevadm trigger"
+echo "4. Ensure /dev/uinput is accessible for Xbox 360 emulation (handled by udev rule above)"
