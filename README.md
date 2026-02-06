@@ -1,4 +1,4 @@
-![Screenshot](images/Screenshot%202025-07-14%20204357.png)
+![Screenshot](images/screenshot.png)
 
 # GameCube Controller Enabler
 
