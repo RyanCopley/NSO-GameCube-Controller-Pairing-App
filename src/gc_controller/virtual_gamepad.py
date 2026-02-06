@@ -140,7 +140,10 @@ class WindowsGamepad(VirtualGamepad):
     def set_rumble_callback(self, callback) -> None:
         def _vg_callback(client, target, large_motor, small_motor, led_number, user_data):
             callback(large_motor, small_motor)
-        self._pad.register_notification(callback_function=_vg_callback)
+        try:
+            self._pad.register_notification(callback_function=_vg_callback)
+        except Exception:
+            pass  # Rumble not available but emulation still works
 
     def close(self) -> None:
         try:

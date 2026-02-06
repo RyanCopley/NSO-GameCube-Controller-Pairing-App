@@ -25,7 +25,6 @@ class ConnectionManager:
         self._on_progress = on_progress
         self.device: Optional[hid.device] = None
         self.device_path: Optional[bytes] = None
-        self._usb_device = None  # pyusb device for endpoint writes (rumble)
 
     @staticmethod
     def enumerate_devices() -> List[dict]:
@@ -35,8 +34,12 @@ class ConnectionManager:
     @staticmethod
     def enumerate_usb_devices() -> list:
         """Return a list of all USB device objects matching the GC controller VID/PID."""
-        devices = usb.core.find(find_all=True, idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
-        return list(devices) if devices else []
+        try:
+            devices = usb.core.find(find_all=True, idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
+            return list(devices) if devices else []
+        except Exception:
+            # pyusb backend not available (e.g. missing libusb on Windows)
+            return []
 
     def initialize_via_usb(self, usb_device=None) -> bool:
         """Initialize controller via USB.
@@ -90,8 +93,13 @@ class ConnectionManager:
             except usb.core.USBError:
                 pass
 
-            # Keep pyusb device reference for rumble writes to endpoint 0x02
-            self._usb_device = dev
+            # Release pyusb resources so the handle is fully closed before
+            # HIDAPI opens the device — prevents conflicts on Windows where
+            # WinUSB and HID class driver can't share the device.
+            try:
+                usb.util.dispose_resources(dev)
+            except Exception:
+                pass
 
             self._on_status("USB initialization complete")
             return True
@@ -142,13 +150,16 @@ class ConnectionManager:
 
         Uses the SW2 vibration pattern command (0x0A) in the standard
         command format — the same transport used for init and LED commands.
+
+        Acquires a fresh pyusb device each time and releases it after use
+        to avoid holding WinUSB handles that conflict with HIDAPI on Windows.
         """
-        dev = self._usb_device
-        if dev is None:
+        try:
             dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
             if dev is None:
                 return False
-            self._usb_device = dev
+        except Exception:
+            return False
         # CMD 0x0A = set vibration pattern, interface 0x00 = USB
         cmd = bytes([0x0a, 0x91, 0x00, 0x02, 0x00, 0x04,
                      0x00, 0x00, 0x01 if state else 0x00,
@@ -167,6 +178,11 @@ class ConnectionManager:
         except Exception as e:
             print(f"USB rumble write error: {e}")
             return False
+        finally:
+            try:
+                usb.util.dispose_resources(dev)
+            except Exception:
+                pass
 
     def disconnect(self):
         """Close and release the HID device."""
@@ -177,4 +193,3 @@ class ConnectionManager:
                 pass
             self.device = None
             self.device_path = None
-        self._usb_device = None
