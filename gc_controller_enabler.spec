@@ -18,6 +18,7 @@ block_cipher = None
 
 # Data files to include
 datas = []
+binaries = []
 if os.path.exists(os.path.join('images', 'controller.png')):
     datas.append((os.path.join('images', 'controller.png'), '.'))
 if os.path.exists(os.path.join('images', 'stick_left.png')):
@@ -25,16 +26,12 @@ if os.path.exists(os.path.join('images', 'stick_left.png')):
 if os.path.exists(os.path.join('images', 'stick_right.png')):
     datas.append((os.path.join('images', 'stick_right.png'), '.'))
 
-# Add vgamepad DLLs for Windows
+# Add vgamepad DLLs for Windows as binaries (not datas) so PyInstaller
+# resolves their transitive dependencies (MSVC runtime, etc.)
 if sys.platform == "win32":
     try:
         import vgamepad
         vgamepad_path = os.path.dirname(vgamepad.__file__)
-        vigem_dll_path = os.path.join(vgamepad_path, 'win', 'vigem', 'client', 'x64', 'ViGEmClient.dll')
-        if os.path.exists(vigem_dll_path):
-            datas.append((vigem_dll_path, 'vgamepad/win/vigem/client/x64/'))
-        
-        # Also include the entire vigem directory structure
         vigem_dir = os.path.join(vgamepad_path, 'win', 'vigem')
         if os.path.exists(vigem_dir):
             for root, dirs, files in os.walk(vigem_dir):
@@ -42,7 +39,7 @@ if sys.platform == "win32":
                     if file.endswith('.dll'):
                         src_path = os.path.join(root, file)
                         rel_path = os.path.relpath(root, vgamepad_path)
-                        datas.append((src_path, f'vgamepad/{rel_path}/'))
+                        binaries.append((src_path, f'vgamepad/{rel_path}/'))
     except Exception:
         pass
 
@@ -104,7 +101,7 @@ elif sys.platform == "linux":
 a = Analysis(
     ['src/gc_controller/__main__.py'],
     pathex=['src'],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
