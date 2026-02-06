@@ -43,7 +43,7 @@ if sys.platform == "win32":
                         src_path = os.path.join(root, file)
                         rel_path = os.path.relpath(root, vgamepad_path)
                         datas.append((src_path, f'vgamepad/{rel_path}/'))
-    except ImportError:
+    except Exception:
         pass
 
 # Hidden imports for libraries that might not be detected
