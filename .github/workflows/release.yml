@@ -74,14 +74,10 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install build tools
-        run: pip install setuptools wheel
-
-      - name: Install vgamepad (skip build isolation)
-        run: pip install --no-build-isolation vgamepad>=0.0.8
-
-      - name: Install remaining dependencies
+      - name: Install Python dependencies
         run: pip install -r requirements.txt
+        env:
+          VGAMEPAD_SKIP_VIGEMBUS_INSTALL: 'true'
 
       - name: Build with PyInstaller
         run: pyinstaller gc_controller_enabler.spec
