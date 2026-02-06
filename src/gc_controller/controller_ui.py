@@ -24,6 +24,7 @@ class SlotUI:
         self.tab_frame: ttk.Frame = None
         self.connect_btn: ttk.Button = None
         self.emulate_btn: ttk.Button = None
+        self.test_rumble_btn: Optional[ttk.Button] = None
 
         # BLE section
         self.pair_btn: Optional[ttk.Button] = None
@@ -76,6 +77,7 @@ class ControllerUI:
                  on_save: Callable,
                  on_refresh: Callable,
                  on_pair: Optional[Callable[[int], None]] = None,
+                 on_test_rumble: Optional[Callable[[int], None]] = None,
                  ble_available: bool = False):
         self._root = root
         self._slot_calibrations = slot_calibrations
@@ -93,6 +95,8 @@ class ControllerUI:
         self._slot_connected: List[bool] = [False] * MAX_SLOTS
         self._slot_emulating: List[bool] = [False] * MAX_SLOTS
         self._initializing = True
+
+        self._on_test_rumble = on_test_rumble
 
         self.slots: List[SlotUI] = []
         self._setup(on_connect, on_emulate, on_stick_cal, on_trigger_cal, on_save,
@@ -289,6 +293,16 @@ class ControllerUI:
         ttk.Radiobutton(mode_frame, text="100% at press",
                         variable=slot_ui.trigger_mode_var, value=False).grid(
                             row=1, column=0, sticky=tk.W)
+
+        # Rumble
+        rumble_frame = ttk.LabelFrame(calibration_frame, text="Rumble", padding="5")
+        rumble_frame.grid(row=3, column=0, pady=(10, 0), sticky=(tk.W, tk.E))
+
+        slot_ui.test_rumble_btn = ttk.Button(
+            rumble_frame, text="Test Rumble",
+            command=lambda i=index: self._on_test_rumble(i) if self._on_test_rumble else None,
+            state='disabled')
+        slot_ui.test_rumble_btn.grid(row=0, column=0, padx=5, pady=2)
 
         # Track per-slot setting changes
         slot_ui.trigger_mode_var.trace_add('write', lambda *_, i=index: self.mark_slot_dirty(i))

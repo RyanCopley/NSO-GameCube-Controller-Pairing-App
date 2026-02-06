@@ -26,17 +26,24 @@ class EmulationManager:
         self.mode: str = 'xbox360'
 
     def start(self, mode: str = 'xbox360', slot_index: int = 0,
-              cancel_event: threading.Event | None = None) -> None:
+              cancel_event: threading.Event | None = None,
+              rumble_callback=None) -> None:
         """Create the virtual gamepad and begin emulation. Raises on failure."""
         self.mode = mode
         self.gamepad = create_gamepad(mode, slot_index=slot_index,
                                      cancel_event=cancel_event)
+        if rumble_callback and mode == 'xbox360':
+            self.gamepad.set_rumble_callback(rumble_callback)
         self.is_emulating = True
 
     def stop(self) -> None:
         """Stop emulation and destroy the virtual gamepad."""
         self.is_emulating = False
         if self.gamepad:
+            try:
+                self.gamepad.stop_rumble_listener()
+            except Exception:
+                pass
             try:
                 self.gamepad.close()
             except Exception:

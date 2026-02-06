@@ -34,6 +34,10 @@ class ControllerSlot:
         self.ble_data_queue: queue.Queue = queue.Queue(maxsize=64)
         self.ble_connected: bool = False
 
+        # Rumble state
+        self.rumble_tid: int = 0
+        self.rumble_state: bool = False
+
         self.cal_mgr = CalibrationManager(calibration)
         self.conn_mgr = ConnectionManager(on_status=on_status, on_progress=on_progress)
         self.emu_mgr = EmulationManager(self.cal_mgr)

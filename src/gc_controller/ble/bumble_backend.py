@@ -31,6 +31,7 @@ class BumbleBackend:
         self._transport = None
         self._device: Optional[Device] = None
         self._connections: dict[str, object] = {}  # mac -> connection
+        self._peers: dict[str, Peer] = {}  # mac -> Peer
         self._hci_index: Optional[int] = None
 
     @property
@@ -141,6 +142,7 @@ class BumbleBackend:
         def _on_disconnection(reason):
             disconnected.set()
             self._connections.pop(mac, None)
+            self._peers.pop(mac, None)
             on_disconnect()
 
         connection.on("disconnection", _on_disconnection)
@@ -175,6 +177,7 @@ class BumbleBackend:
         # MTU exchange (SW2 input reports are 63 bytes)
         on_status("MTU exchange...")
         peer = Peer(connection)
+        self._peers[mac] = peer
         try:
             await peer.request_mtu(512)
         except Exception:
@@ -182,6 +185,7 @@ class BumbleBackend:
 
         if disconnected.is_set():
             self._connections.pop(mac, None)
+            self._peers.pop(mac, None)
             return None
 
         # GATT discovery
@@ -217,6 +221,7 @@ class BumbleBackend:
 
         if not success or disconnected.is_set():
             self._connections.pop(mac, None)
+            self._peers.pop(mac, None)
             if not disconnected.is_set():
                 try:
                     await connection.disconnect()
@@ -271,8 +276,22 @@ class BumbleBackend:
 
         return found_mac[0]
 
+    async def send_rumble(self, mac: str, packet: bytes) -> bool:
+        """Send rumble packet to controller via ATT write (no response)."""
+        peer = self._peers.get(mac)
+        if not peer:
+            return False
+        try:
+            from .sw2_protocol import H_OUT_CMD
+            await peer.gatt_client.write_value(
+                attribute=H_OUT_CMD, value=packet, with_response=False)
+            return True
+        except Exception:
+            return False
+
     async def disconnect(self, mac_address: str):
         """Disconnect a specific controller."""
+        self._peers.pop(mac_address, None)
         connection = self._connections.pop(mac_address, None)
         if connection:
             try:

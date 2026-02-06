@@ -74,6 +74,14 @@ class VirtualGamepad(ABC):
     def close(self) -> None:
         """Destroy the virtual device and release resources."""
 
+    def set_rumble_callback(self, callback) -> None:
+        """Set callback(large_motor: int, small_motor: int) for FF events. Optional."""
+        pass
+
+    def stop_rumble_listener(self) -> None:
+        """Stop any background rumble listener thread. Called from close()."""
+        pass
+
 
 class WindowsGamepad(VirtualGamepad):
     """Windows implementation using vgamepad (ViGEmBus)."""
@@ -129,6 +137,11 @@ class WindowsGamepad(VirtualGamepad):
     def reset(self) -> None:
         self._pad.reset()
 
+    def set_rumble_callback(self, callback) -> None:
+        def _vg_callback(client, target, large_motor, small_motor, led_number, user_data):
+            callback(large_motor, small_motor)
+        self._pad.register_notification(callback_function=_vg_callback)
+
     def close(self) -> None:
         try:
             self._pad.reset()
@@ -149,6 +162,9 @@ class LinuxGamepad(VirtualGamepad):
         from evdev import UInput, AbsInfo, ecodes
 
         self._ecodes = ecodes
+        self._rumble_callback = None
+        self._rumble_thread = None
+        self._rumble_stop = threading.Event()
 
         # Capability setup for Xbox 360 controller
         cap = {
@@ -179,6 +195,9 @@ class LinuxGamepad(VirtualGamepad):
                 ecodes.BTN_SELECT,  # Back
                 ecodes.BTN_MODE,    # Guide
             ],
+            ecodes.EV_FF: [
+                ecodes.FF_RUMBLE,
+            ],
         }
 
         self._device = UInput(
@@ -188,6 +207,7 @@ class LinuxGamepad(VirtualGamepad):
             product=0x028E,
             version=0x0110,
             bustype=ecodes.BUS_USB,
+            max_effects=16,
         )
 
         # Button mapping: GamepadButton -> evdev key code
@@ -281,7 +301,57 @@ class LinuxGamepad(VirtualGamepad):
             self._device.write(ec.EV_KEY, code, 0)
         self._device.syn()
 
+    def set_rumble_callback(self, callback) -> None:
+        self._rumble_callback = callback
+        self._rumble_stop.clear()
+        self._rumble_thread = threading.Thread(
+            target=self._rumble_reader, daemon=True)
+        self._rumble_thread.start()
+
+    def stop_rumble_listener(self) -> None:
+        self._rumble_stop.set()
+        self._rumble_thread = None
+
+    def _rumble_reader(self):
+        """Background thread: read FF events from the UInput fd.
+
+        The UInput fd receives EV_UINPUT events (upload/erase handshakes)
+        and EV_FF events (play/stop) from applications using the virtual
+        gamepad.  UInput inherits EventIO.read() which reads from self.fd.
+        """
+        import select
+        from evdev import ecodes
+
+        while not self._rumble_stop.is_set():
+            try:
+                r, _, _ = select.select([self._device.fd], [], [], 0.1)
+                if not r:
+                    continue
+
+                for event in self._device.read():
+                    if event.type == ecodes.EV_UINPUT:
+                        if event.code == ecodes.UI_FF_UPLOAD:
+                            upload = self._device.begin_upload(event.value)
+                            upload.retval = 0
+                            self._device.end_upload(upload)
+                        elif event.code == ecodes.UI_FF_ERASE:
+                            erase = self._device.begin_erase(event.value)
+                            erase.retval = 0
+                            self._device.end_erase(erase)
+                    elif event.type == ecodes.EV_FF:
+                        if self._rumble_callback:
+                            if event.value > 0:
+                                self._rumble_callback(255, 255)
+                            else:
+                                self._rumble_callback(0, 0)
+            except OSError:
+                break
+            except Exception:
+                if self._rumble_stop.is_set():
+                    break
+
     def close(self) -> None:
+        self.stop_rumble_listener()
         try:
             self.reset()
         except Exception:

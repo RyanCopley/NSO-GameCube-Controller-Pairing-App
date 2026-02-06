@@ -43,6 +43,7 @@ from .connection_manager import ConnectionManager
 from .emulation_manager import EmulationManager
 from .input_processor import InputProcessor
 from .controller_slot import ControllerSlot
+from .ble.sw2_protocol import build_rumble_packet
 
 # BLE support (optional — only available on Linux with bumble)
 try:
@@ -122,6 +123,7 @@ class GCControllerEnabler:
             on_save=self.save_settings,
             on_refresh=self.refresh_devices,
             on_pair=self.pair_controller if self._ble_available else None,
+            on_test_rumble=self.test_rumble,
             ble_available=self._ble_available,
         )
 
@@ -212,6 +214,23 @@ class GCControllerEnabler:
         self.refresh_devices()
         self.toggle_emulation(slot_index)
 
+    def _reset_rumble(self, slot_index: int):
+        """Send rumble OFF if currently ON and reset rumble state."""
+        slot = self.slots[slot_index]
+        if not slot.rumble_state:
+            return
+        slot.rumble_state = False
+        packet = build_rumble_packet(False, slot.rumble_tid)
+        slot.rumble_tid = (slot.rumble_tid + 1) & 0x0F
+        if slot.ble_connected:
+            self._send_ble_cmd({
+                "cmd": "rumble",
+                "slot_index": slot_index,
+                "data": base64.b64encode(packet).decode('ascii'),
+            })
+        elif slot.conn_mgr.device:
+            slot.conn_mgr.send_rumble(False)
+
     def disconnect_controller(self, slot_index: int):
         """Disconnect from controller on a specific slot."""
         slot = self.slots[slot_index]
@@ -222,14 +241,15 @@ class GCControllerEnabler:
             self._disconnect_ble(slot_index)
             return
 
+        self._reset_rumble(slot_index)
         slot.input_proc.stop()
         slot.emu_mgr.stop()
         slot.conn_mgr.disconnect()
         slot.device_path = None
 
         sui.connect_btn.config(text="Connect")
-        sui.emulate_btn.config(state='disabled')
-        sui.emulate_btn.config(text="Start Emulation")
+        sui.emulate_btn.config(state='disabled', text="Start Emulation")
+        sui.test_rumble_btn.config(state='disabled')
         self.ui.update_status(slot_index, "Disconnected")
         self.ui.reset_slot_ui(slot_index)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
@@ -527,6 +547,7 @@ class GCControllerEnabler:
         slot = self.slots[slot_index]
         sui = self.ui.slots[slot_index]
 
+        self._reset_rumble(slot_index)
         slot.input_proc.stop()
         slot.emu_mgr.stop()
 
@@ -549,6 +570,7 @@ class GCControllerEnabler:
         if sui.pair_btn:
             sui.pair_btn.config(text="Pair Controller", state='normal')
         sui.emulate_btn.config(state='disabled', text="Start Emulation")
+        sui.test_rumble_btn.config(state='disabled')
         self.ui.update_status(slot_index, "Disconnected")
         self.ui.reset_slot_ui(slot_index)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
@@ -572,6 +594,7 @@ class GCControllerEnabler:
         if sui.pair_btn:
             sui.pair_btn.config(state='disabled')
         sui.emulate_btn.config(state='disabled')
+        sui.test_rumble_btn.config(state='disabled')
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
         self._attempt_ble_reconnect(slot_index)
@@ -738,6 +761,7 @@ class GCControllerEnabler:
         self.ui.update_status(slot_index, "Controller disconnected — reconnecting...")
         sui.connect_btn.config(text="Connect")
         sui.emulate_btn.config(state='disabled')
+        sui.test_rumble_btn.config(state='disabled')
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
         self._attempt_reconnect(slot_index)
@@ -824,6 +848,7 @@ class GCControllerEnabler:
                 slot._pipe_cancel = None
             slot.emu_mgr.stop()
             sui.emulate_btn.config(text="Start Emulation")
+            sui.test_rumble_btn.config(state='disabled')
             self.ui.update_emu_status(slot_index, "")
             self.ui.update_tab_status(slot_index, connected=slot.is_connected, emulating=False)
         else:
@@ -841,13 +866,84 @@ class GCControllerEnabler:
             else:
                 self._start_xbox360_emulation(slot_index)
 
+    def _make_rumble_callback(self, slot_index: int):
+        """Create a rumble callback closure for a specific slot."""
+        def _on_rumble(large_motor: int, small_motor: int):
+            slot = self.slots[slot_index]
+            new_state = (large_motor > 0 or small_motor > 0)
+            if new_state == slot.rumble_state:
+                return  # No change, skip
+            slot.rumble_state = new_state
+            packet = build_rumble_packet(new_state, slot.rumble_tid)
+            slot.rumble_tid = (slot.rumble_tid + 1) & 0x0F
+
+            if slot.ble_connected:
+                self._send_ble_cmd({
+                    "cmd": "rumble",
+                    "slot_index": slot_index,
+                    "data": base64.b64encode(packet).decode('ascii'),
+                })
+            elif slot.conn_mgr.device:
+                slot.conn_mgr.send_rumble(new_state)
+        return _on_rumble
+
+    def test_rumble(self, slot_index: int):
+        """Send a short rumble burst (~500ms) to test the motor."""
+        slot = self.slots[slot_index]
+        sui = self.ui.slots[slot_index]
+
+        if not slot.emu_mgr.is_emulating:
+            return
+        if not (slot.ble_connected or slot.conn_mgr.device):
+            return
+
+        # Send rumble ON (update state so dedup in game callback stays in sync)
+        slot.rumble_state = True
+        packet_on = build_rumble_packet(True, slot.rumble_tid)
+        slot.rumble_tid = (slot.rumble_tid + 1) & 0x0F
+
+        if slot.ble_connected:
+            self._send_ble_cmd({
+                "cmd": "rumble",
+                "slot_index": slot_index,
+                "data": base64.b64encode(packet_on).decode('ascii'),
+            })
+        elif slot.conn_mgr.device:
+            slot.conn_mgr.send_rumble(True)
+
+        # Disable button during test
+        sui.test_rumble_btn.config(state='disabled')
+
+        # Schedule rumble OFF after 500ms
+        def _stop_rumble():
+            slot.rumble_state = False
+            packet_off = build_rumble_packet(False, slot.rumble_tid)
+            slot.rumble_tid = (slot.rumble_tid + 1) & 0x0F
+
+            if slot.ble_connected:
+                self._send_ble_cmd({
+                    "cmd": "rumble",
+                    "slot_index": slot_index,
+                    "data": base64.b64encode(packet_off).decode('ascii'),
+                })
+            elif slot.conn_mgr.device:
+                slot.conn_mgr.send_rumble(False)
+
+            # Re-enable button if still emulating
+            if slot.emu_mgr.is_emulating:
+                sui.test_rumble_btn.config(state='normal')
+
+        self.root.after(500, _stop_rumble)
+
     def _start_xbox360_emulation(self, slot_index: int):
         """Start Xbox 360 emulation synchronously."""
         slot = self.slots[slot_index]
         sui = self.ui.slots[slot_index]
         try:
-            slot.emu_mgr.start('xbox360', slot_index=slot_index)
+            slot.emu_mgr.start('xbox360', slot_index=slot_index,
+                               rumble_callback=self._make_rumble_callback(slot_index))
             sui.emulate_btn.config(text="Stop Emulation")
+            sui.test_rumble_btn.config(state='normal')
             self.ui.update_emu_status(slot_index, "Xbox 360 active")
             self.ui.update_tab_status(slot_index, connected=True, emulating=True)
         except Exception as e:
@@ -1015,6 +1111,7 @@ class GCControllerEnabler:
     def on_closing(self):
         """Handle application closing."""
         for i in range(MAX_SLOTS):
+            self._reset_rumble(i)
             slot = self.slots[i]
             slot.input_proc.stop()
             slot.emu_mgr.stop()
@@ -1307,6 +1404,36 @@ def run_headless(mode_override: str = None):
         print(f"Found {len(all_hid)} USB controller(s). "
               f"Connecting up to {min(MAX_SLOTS, len(all_hid))}...")
 
+    # Per-slot rumble state for headless mode
+    rumble_tids = [0] * MAX_SLOTS
+    rumble_states = [False] * MAX_SLOTS
+
+    def _make_headless_rumble_cb(slot_idx, conn_mgr_ref=None):
+        """Create a rumble callback for headless mode (USB or BLE)."""
+        def _on_rumble(large_motor, small_motor):
+            new_state = (large_motor > 0 or small_motor > 0)
+            if new_state == rumble_states[slot_idx]:
+                return
+            rumble_states[slot_idx] = new_state
+            packet = build_rumble_packet(new_state, rumble_tids[slot_idx])
+            rumble_tids[slot_idx] = (rumble_tids[slot_idx] + 1) & 0x0F
+
+            # Check if this slot is BLE
+            is_ble = False
+            for s in active_slots:
+                if s['index'] == slot_idx and s['type'] == 'ble':
+                    is_ble = True
+                    break
+            if is_ble and ble_mgr and ble_mgr.is_alive:
+                ble_mgr.send_cmd({
+                    "cmd": "rumble",
+                    "slot_index": slot_idx,
+                    "data": base64.b64encode(packet).decode('ascii'),
+                })
+            elif conn_mgr_ref and conn_mgr_ref.device:
+                conn_mgr_ref.send_rumble(new_state)
+        return _on_rumble
+
     def _connect_slot(i, path):
         """Helper to connect a single USB slot to a specific HID path."""
         cal = slot_calibrations[i]
@@ -1328,7 +1455,8 @@ def run_headless(mode_override: str = None):
         mode_label = "Dolphin pipe" if slot_mode == 'dolphin_pipe' else "Xbox 360"
         print(f"[slot {i + 1}] Starting {mode_label} emulation...")
         try:
-            emu_mgr.start(slot_mode, slot_index=i)
+            rumble_cb = _make_headless_rumble_cb(i, conn_mgr_ref=conn_mgr)
+            emu_mgr.start(slot_mode, slot_index=i, rumble_callback=rumble_cb)
         except Exception as e:
             print(f"[slot {i + 1}] Failed to start emulation: {e}")
             conn_mgr.disconnect()
@@ -1473,7 +1601,8 @@ def run_headless(mode_override: str = None):
             print(f"[slot {si + 1}] Starting {mode_label} emulation...")
 
             try:
-                emu_mgr.start(slot_mode, slot_index=si)
+                rumble_cb = _make_headless_rumble_cb(si)
+                emu_mgr.start(slot_mode, slot_index=si, rumble_callback=rumble_cb)
             except Exception as e:
                 print(f"[slot {si + 1}] Failed to start emulation: {e}")
                 ble_data_queues.pop(si, None)
@@ -1701,7 +1830,10 @@ def run_headless(mode_override: str = None):
                             slot_mode = mode_override if mode_override else \
                                 slot_calibrations[idx].get('emulation_mode', mode)
                             try:
-                                emu_mgr.start(slot_mode, slot_index=idx)
+                                rumble_cb = _make_headless_rumble_cb(
+                                    idx, conn_mgr_ref=conn_mgr)
+                                emu_mgr.start(slot_mode, slot_index=idx,
+                                              rumble_callback=rumble_cb)
                                 mode_label = "Dolphin pipe" if slot_mode == 'dolphin_pipe' \
                                     else "Xbox 360"
                                 print(f"[slot {idx + 1}] {mode_label} emulation resumed.")
@@ -1721,6 +1853,20 @@ def run_headless(mode_override: str = None):
 
     print("\nShutting down...")
     for slot_info in active_slots:
+        idx = slot_info['index']
+        # Send rumble OFF before tearing down
+        if rumble_states[idx]:
+            rumble_states[idx] = False
+            packet = build_rumble_packet(False, rumble_tids[idx])
+            rumble_tids[idx] = (rumble_tids[idx] + 1) & 0x0F
+            if slot_info['type'] == 'ble' and ble_mgr and ble_mgr.is_alive:
+                ble_mgr.send_cmd({
+                    "cmd": "rumble",
+                    "slot_index": idx,
+                    "data": base64.b64encode(packet).decode('ascii'),
+                })
+            elif slot_info['conn_mgr'] and slot_info['conn_mgr'].device:
+                slot_info['conn_mgr'].send_rumble(False)
         slot_info['input_proc'].stop()
         slot_info['emu_mgr'].stop()
         if slot_info['type'] == 'usb' and slot_info['conn_mgr']:

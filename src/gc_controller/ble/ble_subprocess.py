@@ -66,7 +66,7 @@ class PipeQueue:
 
 
 async def do_scan_connect(backend, slot_index, target_address,
-                          exclude_addresses=None):
+                          exclude_addresses=None, slot_macs=None):
     """Run scan_and_connect as a background asyncio task."""
     pq = PipeQueue(slot_index)
 
@@ -74,6 +74,8 @@ async def do_scan_connect(backend, slot_index, target_address,
         send({"e": "status", "s": _si, "msg": msg})
 
     def on_disconnect(_si=slot_index):
+        if slot_macs is not None:
+            slot_macs.pop(_si, None)
         send({"e": "disconnected", "s": _si})
 
     try:
@@ -86,6 +88,8 @@ async def do_scan_connect(backend, slot_index, target_address,
             exclude_addresses=exclude_addresses,
         )
         if mac:
+            if slot_macs is not None:
+                slot_macs[slot_index] = mac
             send({"e": "connected", "s": slot_index, "mac": mac})
         else:
             send({"e": "connect_error", "s": slot_index,
@@ -133,6 +137,7 @@ def main():
 
     async def process():
         connect_tasks = {}  # slot_index -> asyncio.Task
+        slot_macs = {}      # slot_index -> mac address (for rumble routing)
 
         while True:
             cmd = await loop.run_in_executor(None, cmd_queue.get)
@@ -165,7 +170,15 @@ def main():
                     connect_tasks[si].cancel()
                 connect_tasks[si] = asyncio.create_task(
                     do_scan_connect(backend, si, cmd.get("target_address"),
-                                    cmd.get("exclude_addresses")))
+                                    cmd.get("exclude_addresses"),
+                                    slot_macs=slot_macs))
+
+            elif action == "rumble":
+                si = cmd.get("slot_index")
+                data = base64.b64decode(cmd["data"])
+                mac = slot_macs.get(si)
+                if mac:
+                    asyncio.create_task(backend.send_rumble(mac, data))
 
             elif action == "disconnect":
                 addr = cmd.get("address")

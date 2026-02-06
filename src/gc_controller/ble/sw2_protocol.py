@@ -221,6 +221,7 @@ except ImportError:
     _BUMBLE_AVAILABLE = False
 
 # --- Fixed ATT Handles ---
+H_OUT_CMD = 0x0016      # Command + rumble prefix output handle
 H_SVC1_ENABLE = 0x0005
 H_INPUT_REPORT = 0x000A
 H_INPUT_CCCD = 0x000B
@@ -263,6 +264,14 @@ PAIR_STEP4 = bytes([
     CMD_PAIRING, REQ_TYPE, IFACE_BLE, 0x03,
     0x00, 0x01, 0x00, 0x00, 0x00,
 ])
+
+
+def build_rumble_packet(state: bool, tid: int) -> bytes:
+    """Build a 21-byte GC rumble packet for BLE handle 0x0016."""
+    buf = bytearray(21)
+    buf[1] = 0x50 | (tid & 0x0F)
+    buf[2] = 0x01 if state else 0x00
+    return bytes(buf)
 
 
 def build_spi_read(addr_bytes: tuple, size: int) -> bytes:

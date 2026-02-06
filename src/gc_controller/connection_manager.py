@@ -25,6 +25,7 @@ class ConnectionManager:
         self._on_progress = on_progress
         self.device: Optional[hid.device] = None
         self.device_path: Optional[bytes] = None
+        self._usb_device = None  # pyusb device for endpoint writes (rumble)
 
     @staticmethod
     def enumerate_devices() -> List[dict]:
@@ -89,6 +90,9 @@ class ConnectionManager:
             except usb.core.USBError:
                 pass
 
+            # Keep pyusb device reference for rumble writes to endpoint 0x02
+            self._usb_device = dev
+
             self._on_status("USB initialization complete")
             return True
 
@@ -133,6 +137,37 @@ class ConnectionManager:
             return False
         return self.init_hid_device(device_path=device_path)
 
+    def send_rumble(self, state: bool) -> bool:
+        """Send a rumble ON/OFF command via USB endpoint 0x02 on interface 1.
+
+        Uses the SW2 vibration pattern command (0x0A) in the standard
+        command format — the same transport used for init and LED commands.
+        """
+        dev = self._usb_device
+        if dev is None:
+            dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
+            if dev is None:
+                return False
+            self._usb_device = dev
+        # CMD 0x0A = set vibration pattern, interface 0x00 = USB
+        cmd = bytes([0x0a, 0x91, 0x00, 0x02, 0x00, 0x04,
+                     0x00, 0x00, 0x01 if state else 0x00,
+                     0x00, 0x00, 0x00])
+        try:
+            try:
+                usb.util.claim_interface(dev, 1)
+            except usb.core.USBError:
+                pass
+            dev.write(0x02, cmd, 1000)
+            try:
+                usb.util.release_interface(dev, 1)
+            except usb.core.USBError:
+                pass
+            return True
+        except Exception as e:
+            print(f"USB rumble write error: {e}")
+            return False
+
     def disconnect(self):
         """Close and release the HID device."""
         if self.device:
@@ -142,3 +177,4 @@ class ConnectionManager:
                 pass
             self.device = None
             self.device_path = None
+        self._usb_device = None

@@ -60,6 +60,7 @@ class BleakBackend:
 
     def __init__(self):
         self._clients: dict[str, BleakClient] = {}  # identifier -> BleakClient
+        self._write_chars: dict[str, object] = {}   # identifier -> handshake char (for rumble writes)
 
     @property
     def is_open(self) -> bool:
@@ -186,6 +187,7 @@ class BleakBackend:
             _log(f"Disconnected from {address}")
             disconnected.set()
             self._clients.pop(address, None)
+            self._write_chars.pop(address, None)
             on_disconnect()
 
         # Connect — use BLEDevice object if available, else address string
@@ -258,9 +260,11 @@ class BleakBackend:
             return None
 
         self._clients[address] = client
+        self._write_chars[address] = handshake_char
 
         if disconnected.is_set():
             self._clients.pop(address, None)
+            self._write_chars.pop(address, None)
             return None
 
         # Subscribe to all notify characteristics
@@ -301,13 +305,27 @@ class BleakBackend:
 
         if disconnected.is_set():
             self._clients.pop(address, None)
+            self._write_chars.pop(address, None)
             return None
 
         on_status("Connected via BLE")
         return address
 
+    async def send_rumble(self, identifier: str, packet: bytes) -> bool:
+        """Send rumble packet via GATT write-without-response."""
+        client = self._clients.get(identifier)
+        char = self._write_chars.get(identifier)
+        if not client or not client.is_connected or not char:
+            return False
+        try:
+            await client.write_gatt_char(char.uuid, bytearray(packet), response=False)
+            return True
+        except Exception:
+            return False
+
     async def disconnect(self, identifier: str):
         """Disconnect a specific controller."""
+        self._write_chars.pop(identifier, None)
         client = self._clients.pop(identifier, None)
         if client and client.is_connected:
             try:

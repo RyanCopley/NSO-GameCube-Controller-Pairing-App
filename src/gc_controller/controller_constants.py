@@ -92,6 +92,12 @@ DEFAULT_CALIBRATION = {
 }
 
 
+# BLE rumble
+BLE_RUMBLE_HANDLE = 0x0016        # ATT handle for command + rumble channel
+BLE_RUMBLE_PACKET_LEN = 21        # Total packet length
+BLE_RUMBLE_TID_BASE = 0x50        # Transaction ID base (lower nibble increments)
+
+
 def normalize(raw, center, range_val):
     """Normalize a raw stick value to [-1.0, 1.0]."""
     return max(-1.0, min(1.0, (raw - center) / max(range_val, 1)))
