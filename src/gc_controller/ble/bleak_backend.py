@@ -18,7 +18,7 @@ from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
 from .sw2_protocol import (
-    H_OUT_CMD, LED_MAP, build_led_cmd, translate_ble_native_to_usb,
+    LED_MAP, build_led_cmd, translate_ble_native_to_usb,
 )
 
 # Nintendo BLE manufacturer company ID (from protocol doc)
@@ -61,6 +61,7 @@ class BleakBackend:
     def __init__(self):
         self._clients: dict[str, BleakClient] = {}  # identifier -> BleakClient
         self._write_chars: dict[str, object] = {}   # identifier -> handshake char (command writes)
+        self._cmd_chars: dict[str, object] = {}     # identifier -> command channel char (for vibration)
 
     @property
     def is_open(self) -> bool:
@@ -188,6 +189,7 @@ class BleakBackend:
             disconnected.set()
             self._clients.pop(address, None)
             self._write_chars.pop(address, None)
+            self._cmd_chars.pop(address, None)
             on_disconnect()
 
         # Connect — use BLEDevice object if available, else address string
@@ -262,9 +264,26 @@ class BleakBackend:
         self._clients[address] = client
         self._write_chars[address] = handshake_char
 
+        # Identify the command channel for vibration commands.
+        # The Nintendo SW2 service has 3 WriteNoResp characteristics:
+        #   1st (lowest handle): Vibration/rumble output (0x0012)
+        #   2nd: Command channel (0x0014) — accepts SW2 commands like 0x0A
+        #   3rd (highest handle): Command + rumble prefix (0x0016)
+        # Find the service with ≥3 WriteNoResp chars, take the 2nd by handle.
+        for svc in client.services:
+            wnr = sorted(
+                [c for c in svc.characteristics
+                 if "write-without-response" in (getattr(c, "properties", []) or [])],
+                key=lambda c: c.handle)
+            if len(wnr) >= 3:
+                self._cmd_chars[address] = wnr[1]
+                _log(f"  Command channel: 0x{wnr[1].handle:04X} {wnr[1].uuid}")
+                break
+
         if disconnected.is_set():
             self._clients.pop(address, None)
             self._write_chars.pop(address, None)
+            self._cmd_chars.pop(address, None)
             return None
 
         # Subscribe to all notify characteristics
@@ -306,30 +325,46 @@ class BleakBackend:
         if disconnected.is_set():
             self._clients.pop(address, None)
             self._write_chars.pop(address, None)
+            self._cmd_chars.pop(address, None)
             return None
 
         on_status("Connected via BLE")
         return address
 
     async def send_rumble(self, identifier: str, packet: bytes) -> bool:
-        """Send rumble packet via GATT write-without-response to handle 0x0016.
+        """Send vibration command via the SW2 command channel.
 
-        Mirrors the Bumble backend: write directly to the ATT handle H_OUT_CMD
-        (0x0016) by integer, avoiding UUID ambiguity between the multiple
-        WriteNoResp characteristics on this controller.
+        The Bumble backend (Linux) writes the 0x50-prefix rumble packet
+        directly to ATT handle 0x0016 after a full SW2 init.  The Bleak
+        backend skips the proprietary pairing, so that handle rejects
+        rumble.  Instead, send the standard SW2 vibration command (0x0A,
+        same format as USB) to the command channel — this works without
+        the full init.  The char object is used directly to avoid
+        UUID/handle ambiguity.
         """
         client = self._clients.get(identifier)
-        if not client or not client.is_connected:
+        cmd_char = self._cmd_chars.get(identifier)
+        if not client or not client.is_connected or not cmd_char:
             return False
+        # Extract on/off state from the rumble packet (byte 2)
+        state = packet[2] if len(packet) > 2 else 0
+        # SW2 vibration command: cmd 0x0A, interface 0x01 (BLE)
+        vibration_cmd = bytearray([
+            0x0A, 0x91, 0x01, 0x02, 0x00, 0x04,
+            0x00, 0x00, 0x01 if state else 0x00,
+            0x00, 0x00, 0x00,
+        ])
         try:
-            await client.write_gatt_char(H_OUT_CMD, bytearray(packet), response=False)
+            await client.write_gatt_char(cmd_char, vibration_cmd, response=False)
             return True
-        except Exception:
+        except Exception as e:
+            _log(f"  Rumble write failed: {type(e).__name__}: {e}")
             return False
 
     async def disconnect(self, identifier: str):
         """Disconnect a specific controller."""
         self._write_chars.pop(identifier, None)
+        self._cmd_chars.pop(identifier, None)
         client = self._clients.pop(identifier, None)
         if client and client.is_connected:
             try:
