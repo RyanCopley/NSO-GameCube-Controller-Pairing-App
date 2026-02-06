@@ -61,7 +61,6 @@ class BleakBackend:
     def __init__(self):
         self._clients: dict[str, BleakClient] = {}  # identifier -> BleakClient
         self._write_chars: dict[str, object] = {}   # identifier -> handshake char (command writes)
-        self._rumble_chars: dict[str, object] = {}  # identifier -> rumble char (handle 0x0016)
 
     @property
     def is_open(self) -> bool:
@@ -189,7 +188,6 @@ class BleakBackend:
             disconnected.set()
             self._clients.pop(address, None)
             self._write_chars.pop(address, None)
-            self._rumble_chars.pop(address, None)
             on_disconnect()
 
         # Connect — use BLEDevice object if available, else address string
@@ -264,33 +262,9 @@ class BleakBackend:
         self._clients[address] = client
         self._write_chars[address] = handshake_char
 
-        # Find rumble characteristic: match by ATT handle (0x0016) first,
-        # then fall back to the write char with the highest handle that
-        # isn't the handshake char.  On Windows/WinRT the ATT handles are
-        # preserved, so matching H_OUT_CMD directly works.
-        rumble_char = None
-        for char in write_chars:
-            if char.handle == H_OUT_CMD:
-                rumble_char = char
-                break
-        if rumble_char is None:
-            # Fallback: pick the write char with the highest handle
-            # (0x0016 > 0x0014 > 0x0012 in the protocol)
-            candidates = sorted(
-                [c for c in write_chars if c.handle != handshake_char.handle],
-                key=lambda c: c.handle, reverse=True)
-            if candidates:
-                rumble_char = candidates[0]
-        if rumble_char:
-            self._rumble_chars[address] = rumble_char
-            _log(f"  Rumble char: 0x{rumble_char.handle:04X} {rumble_char.uuid}")
-        else:
-            _log(f"  No separate rumble char found, will use handshake char")
-
         if disconnected.is_set():
             self._clients.pop(address, None)
             self._write_chars.pop(address, None)
-            self._rumble_chars.pop(address, None)
             return None
 
         # Subscribe to all notify characteristics
@@ -332,20 +306,23 @@ class BleakBackend:
         if disconnected.is_set():
             self._clients.pop(address, None)
             self._write_chars.pop(address, None)
-            self._rumble_chars.pop(address, None)
             return None
 
         on_status("Connected via BLE")
         return address
 
     async def send_rumble(self, identifier: str, packet: bytes) -> bool:
-        """Send rumble packet via GATT write-without-response."""
+        """Send rumble packet via GATT write-without-response to handle 0x0016.
+
+        Mirrors the Bumble backend: write directly to the ATT handle H_OUT_CMD
+        (0x0016) by integer, avoiding UUID ambiguity between the multiple
+        WriteNoResp characteristics on this controller.
+        """
         client = self._clients.get(identifier)
-        char = self._rumble_chars.get(identifier) or self._write_chars.get(identifier)
-        if not client or not client.is_connected or not char:
+        if not client or not client.is_connected:
             return False
         try:
-            await client.write_gatt_char(char.uuid, bytearray(packet), response=False)
+            await client.write_gatt_char(H_OUT_CMD, bytearray(packet), response=False)
             return True
         except Exception:
             return False
@@ -353,7 +330,6 @@ class BleakBackend:
     async def disconnect(self, identifier: str):
         """Disconnect a specific controller."""
         self._write_chars.pop(identifier, None)
-        self._rumble_chars.pop(identifier, None)
         client = self._clients.pop(identifier, None)
         if client and client.is_connected:
             try:
