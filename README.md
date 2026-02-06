@@ -26,6 +26,15 @@ A cross-platform Python/Tkinter tool that connects Nintendo Switch Online GameCu
 | Xbox 360 emulation | Yes (ViGEmBus) | Yes (evdev/uinput) | — |
 | Dolphin pipe mode | — | Yes | Yes |
 
+## Bluetooth Chipset Compatibility
+
+| Chipset | Status |
+|---|---|
+| Qualcomm | Working |
+| Realtek | Working |
+| Intel | Unknown |
+| Broadcom | Unknown |
+
 ## Requirements
 
 - Python 3.7+
