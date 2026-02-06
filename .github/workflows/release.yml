@@ -1,0 +1,103 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller gc_controller_enabler.spec
+
+      - name: Prepare artifact
+        run: mv dist/GC-Controller-Enabler dist/GC-Controller-Enabler-Linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GC-Controller-Enabler-Linux
+          path: dist/GC-Controller-Enabler-Linux
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: brew install libusb
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller gc_controller_enabler.spec
+
+      - name: Zip macOS app bundle
+        run: cd dist && zip -r GC-Controller-Enabler-macOS.zip GC-Controller-Enabler.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GC-Controller-Enabler-macOS
+          path: dist/GC-Controller-Enabler-macOS.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller gc_controller_enabler.spec
+
+      - name: Prepare artifact
+        run: mv dist/GC-Controller-Enabler.exe dist/GC-Controller-Enabler-Windows.exe
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GC-Controller-Enabler-Windows
+          path: dist/GC-Controller-Enabler-Windows.exe
+
+  release:
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            GC-Controller-Enabler-Linux/GC-Controller-Enabler-Linux
+            GC-Controller-Enabler-macOS/GC-Controller-Enabler-macOS.zip
+            GC-Controller-Enabler-Windows/GC-Controller-Enabler-Windows.exe
