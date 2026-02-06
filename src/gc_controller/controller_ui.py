@@ -653,7 +653,7 @@ class ControllerUI:
     def update_status(self, slot_index: int, message: str):
         """Update the shared status label for a specific slot."""
         s = self.slots[slot_index]
-        if s.status_label and message:
+        if s.status_label is not None:
             s.status_label.config(text=message)
 
     def update_ble_status(self, slot_index: int, message: str):
