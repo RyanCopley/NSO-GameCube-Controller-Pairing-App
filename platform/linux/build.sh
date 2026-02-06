@@ -21,10 +21,6 @@ mkdir -p dist
 echo "Building executable..."
 pyinstaller --onefile \
     --name "GC-Controller-Enabler" \
-    --icon=images/controller.png \
-    --add-data "images/controller.png:." \
-    --add-data "images/stick_left.png:." \
-    --add-data "images/stick_right.png:." \
     --paths src \
     --hidden-import evdev \
     --hidden-import gc_controller.virtual_gamepad \

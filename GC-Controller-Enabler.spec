@@ -5,7 +5,7 @@ a = Analysis(
     ['src/gc_controller/__main__.py'],
     pathex=['src'],
     binaries=[],
-    datas=[('images/controller.png', '.'), ('images/stick_left.png', '.'), ('images/stick_right.png', '.')],
+    datas=[],
     hiddenimports=['evdev', 'gc_controller.virtual_gamepad', 'gc_controller.controller_constants', 'gc_controller.settings_manager', 'gc_controller.calibration', 'gc_controller.connection_manager', 'gc_controller.emulation_manager', 'gc_controller.controller_ui', 'gc_controller.input_processor'],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['images/controller.png'],
 )
