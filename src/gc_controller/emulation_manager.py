@@ -8,6 +8,7 @@ Supports Xbox 360 mode and Dolphin named pipe mode.
 """
 
 import errno
+import threading
 from typing import Optional, Dict
 
 from .virtual_gamepad import VirtualGamepad, create_gamepad
@@ -24,10 +25,12 @@ class EmulationManager:
         self.is_emulating = False
         self.mode: str = 'xbox360'
 
-    def start(self, mode: str = 'xbox360', slot_index: int = 0) -> None:
+    def start(self, mode: str = 'xbox360', slot_index: int = 0,
+              cancel_event: threading.Event | None = None) -> None:
         """Create the virtual gamepad and begin emulation. Raises on failure."""
         self.mode = mode
-        self.gamepad = create_gamepad(mode, slot_index=slot_index)
+        self.gamepad = create_gamepad(mode, slot_index=slot_index,
+                                     cancel_event=cancel_event)
         self.is_emulating = True
 
     def stop(self) -> None:

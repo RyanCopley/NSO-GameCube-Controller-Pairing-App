@@ -692,7 +692,12 @@ class GCControllerEnabler:
         slot = self.slots[slot_index]
         sui = self.ui.slots[slot_index]
 
-        if slot.emu_mgr.is_emulating:
+        if slot.emu_mgr.is_emulating or getattr(slot, '_pipe_cancel', None):
+            # Cancel a pending dolphin pipe wait, or stop active emulation.
+            cancel = getattr(slot, '_pipe_cancel', None)
+            if cancel is not None:
+                cancel.set()
+                slot._pipe_cancel = None
             slot.emu_mgr.stop()
             sui.emulate_btn.config(text="Start Emulation")
             self.ui.update_emu_status(slot_index, "")
@@ -707,39 +712,73 @@ class GCControllerEnabler:
                     + get_emulation_unavailable_reason(mode))
                 return
 
+            if mode == 'dolphin_pipe':
+                self._start_dolphin_pipe_emulation(slot_index)
+            else:
+                self._start_xbox360_emulation(slot_index)
+
+    def _start_xbox360_emulation(self, slot_index: int):
+        """Start Xbox 360 emulation synchronously."""
+        slot = self.slots[slot_index]
+        sui = self.ui.slots[slot_index]
+        try:
+            slot.emu_mgr.start('xbox360', slot_index=slot_index)
+            sui.emulate_btn.config(text="Stop Emulation")
+            self.ui.update_emu_status(slot_index, "Xbox 360 active")
+            self.ui.update_tab_status(slot_index, connected=True, emulating=True)
+        except Exception as e:
+            self._messagebox.showerror("Emulation Error",
+                                       f"Failed to start emulation: {e}")
+
+    def _start_dolphin_pipe_emulation(self, slot_index: int):
+        """Start Dolphin pipe emulation on a background thread.
+
+        Polls until Dolphin opens the read end of the pipe.  The button
+        switches to 'Cancel' so the user can abort the wait.
+        """
+        slot = self.slots[slot_index]
+        sui = self.ui.slots[slot_index]
+        pipe_name = f'gc_controller_{slot_index + 1}'
+
+        cancel = threading.Event()
+        slot._pipe_cancel = cancel
+        sui.emulate_btn.config(text="Cancel")
+        self.ui.update_emu_status(
+            slot_index, f"Waiting for Dolphin to read {pipe_name}...")
+
+        def _connect():
             try:
-                slot.emu_mgr.start(mode, slot_index=slot_index)
-                sui.emulate_btn.config(text="Stop Emulation")
-                pipe_name = f'gc_controller_{slot_index + 1}'
-                if mode == 'dolphin_pipe':
-                    self.ui.update_emu_status(
-                        slot_index, f"Dolphin pipe active ({pipe_name})")
-                else:
-                    self.ui.update_emu_status(slot_index, "Xbox 360 active")
-                self.ui.update_tab_status(slot_index, connected=True, emulating=True)
-            except OSError as e:
-                if e.errno == errno.ENXIO:
-                    pipe_name = f'gc_controller_{slot_index + 1}'
-                    self._messagebox.showerror(
-                        "Emulation Error",
-                        "Dolphin is not reading the pipe.\n\n"
-                        "You may need to restart Dolphin if this is the first "
-                        "time you've launched this tool.\n\n"
-                        "To configure the pipe controller in Dolphin:\n"
-                        f"1. Open Controllers (top menu bar)\n"
-                        f"2. Under GameCube, set Port {slot_index + 1} to "
-                        f"'Standard Controller'\n"
-                        f"3. Click 'Configure' next to Port {slot_index + 1}\n"
-                        f"4. In the Device dropdown, select "
-                        f"'Pipe/0/{pipe_name}'\n"
-                        f"5. Update your button/stick/trigger bindings\n"
-                        f"6. Click Close, then try Start Emulation again")
-                else:
-                    self._messagebox.showerror("Emulation Error",
-                                               f"Failed to start emulation: {e}")
+                slot.emu_mgr.start('dolphin_pipe', slot_index=slot_index,
+                                   cancel_event=cancel)
+                self.root.after(0, lambda: self._on_pipe_connected(slot_index))
             except Exception as e:
-                self._messagebox.showerror("Emulation Error",
-                                           f"Failed to start emulation: {e}")
+                self.root.after(0, lambda: self._on_pipe_failed(slot_index, e))
+
+        threading.Thread(target=_connect, daemon=True).start()
+
+    def _on_pipe_connected(self, slot_index: int):
+        """Called on the main thread when a dolphin pipe successfully opens."""
+        slot = self.slots[slot_index]
+        sui = self.ui.slots[slot_index]
+        slot._pipe_cancel = None
+        pipe_name = f'gc_controller_{slot_index + 1}'
+        sui.emulate_btn.config(text="Stop Emulation")
+        self.ui.update_emu_status(
+            slot_index, f"Dolphin pipe active ({pipe_name})")
+        self.ui.update_tab_status(slot_index, connected=True, emulating=True)
+
+    def _on_pipe_failed(self, slot_index: int, error: Exception):
+        """Called on the main thread when dolphin pipe open fails or is cancelled."""
+        slot = self.slots[slot_index]
+        sui = self.ui.slots[slot_index]
+        slot._pipe_cancel = None
+        slot.emu_mgr.stop()
+        sui.emulate_btn.config(text="Start Emulation")
+        self.ui.update_emu_status(slot_index, "")
+        self.ui.update_tab_status(slot_index, connected=slot.is_connected, emulating=False)
+        if getattr(error, 'errno', None) != errno.ECANCELED:
+            self._messagebox.showerror("Emulation Error",
+                                       f"Failed to start pipe emulation: {error}")
 
     # ── Stick calibration ────────────────────────────────────────────
 

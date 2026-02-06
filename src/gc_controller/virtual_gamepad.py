@@ -10,6 +10,8 @@ import errno
 import os
 import stat
 import sys
+import time
+import threading
 from abc import ABC, abstractmethod
 from enum import Enum, auto
 
@@ -290,62 +292,96 @@ class LinuxGamepad(VirtualGamepad):
             pass
 
 
-_FLATPAK_DOLPHIN_DATA = os.path.expanduser(
-    '~/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu')
+def _get_real_home() -> str:
+    """Get the real user's home directory, even when running under sudo."""
+    sudo_user = os.environ.get('SUDO_USER')
+    if sudo_user:
+        import pwd
+        try:
+            return pwd.getpwnam(sudo_user).pw_dir
+        except KeyError:
+            pass
+    return os.path.expanduser('~')
 
 
-def _get_dolphin_user_dir() -> str:
-    """Determine the Dolphin user directory using the same priority as Dolphin itself.
+_REAL_HOME = _get_real_home()
 
-    On macOS: ~/Library/Application Support/Dolphin
-    On Linux (per Dolphin UICommon.cpp):
-      1. $DOLPHIN_EMU_USERPATH if set
-      2. Flatpak data dir if it exists (Flatpak ignores ~/.dolphin-emu)
-      3. ~/.dolphin-emu if it already exists (legacy compat)
-      4. $XDG_DATA_HOME/dolphin-emu (defaults to ~/.local/share/dolphin-emu)
+_FLATPAK_DOLPHIN_DATA = os.path.join(
+    _REAL_HOME, '.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu')
+
+
+def _get_all_dolphin_user_dirs() -> list[str]:
+    """Return all detected Dolphin user directories that exist on disk.
+
+    Checks every known location so that pipes are created in all of them,
+    regardless of how Dolphin was installed (Flatpak, native package, etc.).
+    Uses the real user's home when running under sudo.
     """
     if sys.platform == 'darwin':
-        return os.path.expanduser('~/Library/Application Support/Dolphin')
+        d = os.path.join(_REAL_HOME, 'Library/Application Support/Dolphin')
+        return [d] if os.path.isdir(d) else []
 
-    # Linux
+    # Linux — collect every directory that exists, deduplicating by realpath.
+    candidates: list[str] = []
+
     env_path = os.environ.get('DOLPHIN_EMU_USERPATH')
     if env_path:
-        return env_path
+        candidates.append(env_path)
 
-    # Flatpak Dolphin uses its own sandboxed XDG dirs and cannot see
-    # ~/.dolphin-emu, so check for the Flatpak data dir first.
-    if os.path.isdir(_FLATPAK_DOLPHIN_DATA):
-        return _FLATPAK_DOLPHIN_DATA
+    candidates.append(_FLATPAK_DOLPHIN_DATA)
+    candidates.append(os.path.join(_REAL_HOME, '.dolphin-emu'))
 
-    legacy = os.path.expanduser('~/.dolphin-emu')
-    if os.path.isdir(legacy):
-        return legacy
+    xdg_data = os.environ.get('XDG_DATA_HOME',
+                               os.path.join(_REAL_HOME, '.local/share'))
+    candidates.append(os.path.join(xdg_data, 'dolphin-emu'))
 
-    xdg_data = os.environ.get('XDG_DATA_HOME', os.path.expanduser('~/.local/share'))
-    return os.path.join(xdg_data, 'dolphin-emu')
+    seen: set[str] = set()
+    result: list[str] = []
+    for path in candidates:
+        real = os.path.realpath(path)
+        if real not in seen and os.path.isdir(path):
+            seen.add(real)
+            result.append(path)
+    return result
 
 
-def ensure_dolphin_pipe(pipe_name: str = 'gc_controller') -> str:
-    """Create the Dolphin named-pipe FIFO on disk if it doesn't exist.
+def ensure_dolphin_pipe(pipe_name: str = 'gc_controller') -> list[str]:
+    """Create the Dolphin named-pipe FIFO in every detected Dolphin user dir.
 
     Call this early (e.g. at app startup) so the pipe file is visible in
     Dolphin's controller device list before emulation is started.
 
-    Returns the full path to the pipe.
+    Returns a list of all pipe paths that were created / verified.
     """
-    pipe_dir = os.path.join(_get_dolphin_user_dir(), 'Pipes')
+    user_dirs = _get_all_dolphin_user_dirs()
+    if not user_dirs:
+        # No existing Dolphin dirs — fall back to XDG default.
+        xdg_data = os.environ.get('XDG_DATA_HOME',
+                                  os.path.expanduser('~/.local/share'))
+        user_dirs = [os.path.join(xdg_data, 'dolphin-emu')]
 
-    os.makedirs(pipe_dir, exist_ok=True)
-    pipe_path = os.path.join(pipe_dir, pipe_name)
+    pipe_paths: list[str] = []
+    for user_dir in user_dirs:
+        pipe_dir = os.path.join(user_dir, 'Pipes')
+        try:
+            os.makedirs(pipe_dir, exist_ok=True)
+            pipe_path = os.path.join(pipe_dir, pipe_name)
 
-    if not os.path.exists(pipe_path):
-        os.mkfifo(pipe_path)
-    elif not stat.S_ISFIFO(os.stat(pipe_path).st_mode):
+            if not os.path.exists(pipe_path):
+                os.mkfifo(pipe_path)
+            elif not stat.S_ISFIFO(os.stat(pipe_path).st_mode):
+                continue  # skip non-FIFO files without failing
+
+            pipe_paths.append(pipe_path)
+        except OSError:
+            continue  # skip dirs we can't write to
+
+    if not pipe_paths:
         raise RuntimeError(
-            f"{pipe_path} exists but is not a FIFO. "
-            "Remove it and try again.")
+            f"Could not create Dolphin pipe '{pipe_name}' in any "
+            "detected Dolphin directory.")
 
-    return pipe_path
+    return pipe_paths
 
 
 class DolphinPipeGamepad(VirtualGamepad):
@@ -370,24 +406,31 @@ class DolphinPipeGamepad(VirtualGamepad):
         GamepadButton.DPAD_RIGHT: 'D_RIGHT',
     }
 
-    def __init__(self, pipe_name: str = 'gc_controller'):
-        self._pipe_path = ensure_dolphin_pipe(pipe_name)
+    def __init__(self, pipe_name: str = 'gc_controller',
+                 cancel_event: threading.Event | None = None):
+        pipe_paths = ensure_dolphin_pipe(pipe_name)
 
-        # Open the pipe for writing (non-blocking so we get ENXIO immediately
-        # if Dolphin hasn't opened the read end yet).
-        try:
-            fd = os.open(self._pipe_path, os.O_WRONLY | os.O_NONBLOCK)
-        except OSError as e:
-            if e.errno == errno.ENXIO:
+        # Poll until Dolphin opens the read end of one of the pipes.
+        # With cancel_event, this can be stopped from another thread.
+        while True:
+            for path in pipe_paths:
+                try:
+                    fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+                    self._pipe_path = path
+                    self._pipe = os.fdopen(fd, 'w')
+                    self._pressed: set[str] = set()
+                    return
+                except OSError as e:
+                    if e.errno != errno.ENXIO:
+                        raise
+
+            if cancel_event is not None and cancel_event.is_set():
+                path_list = '\n  '.join(pipe_paths)
                 raise OSError(
-                    errno.ENXIO,
-                    "Dolphin is not reading the pipe. "
-                    "Please configure the pipe controller in Dolphin first.\n"
-                    f"Pipe path: {self._pipe_path}")
-            raise
+                    errno.ECANCELED,
+                    f"Pipe emulation cancelled.\nPipes:\n  {path_list}")
 
-        self._pipe = os.fdopen(fd, 'w')
-        self._pressed: set[str] = set()
+            time.sleep(0.5)
 
     def left_joystick(self, x_value: int, y_value: int) -> None:
         x = (x_value / 32767 + 1) / 2
@@ -492,11 +535,12 @@ def get_emulation_unavailable_reason(mode: str = 'xbox360') -> str:
         return f"Xbox 360 emulation is not supported on {sys.platform}."
 
 
-def create_gamepad(mode: str = 'xbox360', slot_index: int = 0) -> VirtualGamepad:
+def create_gamepad(mode: str = 'xbox360', slot_index: int = 0,
+                   cancel_event: threading.Event | None = None) -> VirtualGamepad:
     """Factory: create the appropriate VirtualGamepad for the current platform/mode."""
     if mode == 'dolphin_pipe':
         pipe_name = f'gc_controller_{slot_index + 1}'
-        return DolphinPipeGamepad(pipe_name=pipe_name)
+        return DolphinPipeGamepad(pipe_name=pipe_name, cancel_event=cancel_event)
 
     # Xbox 360 mode
     if sys.platform == "win32":
