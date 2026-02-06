@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gc-controller"
+version = "1.0.0"
+description = "GameCube Controller Enabler - Xbox 360 emulation for GC controllers"
+requires-python = ">=3.7"
+dependencies = [
+    "hidapi>=0.14.0",
+    "pyusb>=1.2.1",
+    "vgamepad>=0.0.8; sys_platform == 'win32'",
+    "evdev>=1.7.0; sys_platform == 'linux'",
+]
+
+[project.scripts]
+gc-controller = "gc_controller.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

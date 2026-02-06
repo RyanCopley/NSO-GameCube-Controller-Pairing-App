@@ -1,21 +1,21 @@
-![](https://github.com/Accolith/GC-controller-enabler/blob/main/Screenshot%202025-07-14%20204357.png)
-# GameCube Controller Enabler - Python Version
+![Screenshot](images/screenshot.png)
 
-A Python/Tkinter implementation of the GameCube Controller Enabler tool that allows connecting GameCube controllers via USB to make them usable on Steam and other platforms.
+# GameCube Controller Enabler
+
+A cross-platform Python/Tkinter tool that connects Nintendo GameCube controllers via USB and makes them usable on Steam and other platforms through Xbox 360 controller emulation.
 
 ## Features
 
-- **USB Initialization**: Sends required initialization commands to GameCube controllers
-- **HID Communication**: Reads controller input via HID interface
-- **Xbox 360 Emulation**: Maps GameCube inputs to Xbox 360 controller using vgamepad
-- **Analog Trigger Calibration**: Configurable trigger ranges for different controller variations
-- **Visual Controller Display**: Real-time visualization of button presses, analog sticks, and triggers
-- **Settings Persistence**: Save and load calibration settings
+- USB initialization and HID communication with GameCube controllers
+- Xbox 360 controller emulation (Windows via vgamepad, Linux via evdev/uinput)
+- Analog trigger calibration for different controller variations
+- Real-time visualization of inputs (buttons, sticks, triggers)
+- Persistent calibration settings
 
 ## Requirements
 
-- Python 3.7 or higher
-- Windows (for Xbox 360 emulation via ViGEmBus)
+- Python 3.7+
+- Platform-specific dependencies (see below)
 
 ## Installation
 
@@ -24,90 +24,117 @@ A Python/Tkinter implementation of the GameCube Controller Enabler tool that all
 pip install -r requirements.txt
 ```
 
-2. For Xbox 360 emulation, install ViGEmBus driver:
-   - Download from: https://github.com/nefarius/ViGEmBus
-   - Install the driver according to their instructions
+2. Platform-specific setup:
+
+### Windows
+- Install the [ViGEmBus driver](https://github.com/nefarius/ViGEmBus) for Xbox 360 emulation
+
+### Linux
+- Install libusb: `sudo apt install libusb-1.0-0-dev` (Ubuntu/Debian) or `sudo dnf install libusb1-devel` (Fedora)
+- Add your user to the `input` group: `sudo usermod -aG input $USER`
+- Install udev rules for controller and uinput access:
+```bash
+sudo cp platform/linux/99-gc-controller.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+- Log out and back in for group changes to take effect
+
+### macOS
+- Install libusb: `brew install libusb`
+- Xbox 360 controller emulation is not available on macOS
 
 ## Usage
 
-### Running from Source
-
-1. Run the application:
+Install in development mode and run:
 ```bash
-python gc_controller_enabler.py
+pip install -e .
+python -m gc_controller
 ```
 
-### Running Pre-built Executables
-
-Download the appropriate executable for your platform from the releases page, or build your own using the provided build scripts:
-
-- **Windows**: Run `build_windows.bat` → executable in `dist/windows/`
-- **macOS**: Run `./build_macos.sh` → executable in `dist/macos/`  
-- **Linux**: Run `./build_linux.sh` → executable in `dist/linux/`
-
-See [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) for detailed build information.
-
-### Controller Setup
-
 1. Connect your GameCube controller via USB
-2. Click "Connect" to initialize the controller
-3. Optionally click "Emulate Xbox 360" to start virtual controller emulation
+2. Click **Connect** to initialize the controller
+3. Click **Emulate Xbox 360** to start virtual controller emulation
+
+## Building Executables
+
+Platform-specific build scripts are in the `platform/` directory:
+
+- **Windows**: `platform/windows/build.bat`
+- **macOS**: `platform/macos/build.sh`
+- **Linux**: `platform/linux/build.sh`
+
+Or use the unified build script:
+```bash
+python build_all.py
+```
 
 ## Calibration
 
-Each GameCube controller may have different analog trigger ranges. The calibration section allows you to configure:
+Each GameCube controller may have different analog trigger ranges. Configure via the calibration section:
 
 - **Base Value**: Resting trigger position (typically ~32)
 - **Bump Value**: Position where trigger "clicks" (typically ~190)
 - **Max Value**: Fully pressed position (typically ~230)
 
-### Trigger Modes
-
-- **100% at bump**: Full trigger response at click point
+Trigger modes:
+- **100% at bump**: Full trigger response at the click point
 - **100% at press**: Full trigger response at maximum press
 
-To calibrate:
-1. Connect your controller
-2. Press and release triggers while observing the raw values
-3. Enter the observed base, bump, and max values
-4. Click "Save Settings" to persist the configuration
+## Project Structure
 
-## Dependencies
-
-- **hid**: HID device communication
-- **pyusb**: USB device initialization
-- **vgamepad**: Xbox 360 controller emulation (optional)
+```
+src/gc_controller/
+  __init__.py               Package marker
+  __main__.py               Entry point (python -m gc_controller)
+  app.py                    Main application orchestrator
+  controller_constants.py   Shared constants, button mappings, calibration defaults
+  settings_manager.py       JSON settings load/save
+  calibration.py            Stick and trigger calibration logic
+  connection_manager.py     USB initialization and HID connection
+  emulation_manager.py      Xbox 360 virtual controller emulation
+  controller_ui.py          Tkinter UI widgets and display updates
+  input_processor.py        HID read thread and data processing
+  virtual_gamepad.py        Cross-platform gamepad abstraction
+pyproject.toml              Project metadata and dependencies
+gc_controller_enabler.spec  PyInstaller spec file
+build_all.py                Unified build script
+images/
+  controller.png            Application icon
+  stick_left.png            Left stick icon
+  stick_right.png           Right stick icon
+  Screenshot *.png          Application screenshot
+platform/
+  linux/
+    build.sh                Linux build script
+    99-gc-controller.rules  udev rules for USB/uinput access
+  macos/
+    build.sh                macOS build script
+  windows/
+    build.bat               Windows build script
+    hook-vgamepad.py        PyInstaller hook for vgamepad
+```
 
 ## Troubleshooting
 
 ### Controller Not Detected
-- Ensure GameCube controller adapter is properly connected
-- Check that the controller is recognized by Windows Device Manager
-- Verify Vendor ID (0x057e) and Product ID (0x2073)
+- Ensure the GameCube controller adapter is connected
+- Verify Vendor ID `0x057e` and Product ID `0x2073` (check `lsusb` on Linux or Device Manager on Windows)
 
 ### Emulation Not Working
-- Install ViGEmBus driver from Nefarius
-- Ensure vgamepad is installed: `pip install vgamepad`
-- Run as administrator if needed
+- **Windows**: Install [ViGEmBus](https://github.com/nefarius/ViGEmBus) and `pip install vgamepad`
+- **Linux**: Install evdev (`pip install evdev`), ensure your user is in the `input` group, and install the udev rules
+- **macOS**: Not supported
 
 ### Permission Errors
-- On Windows, HID access may require administrator privileges
-- Try running the application as administrator
-
-## Differences from C# Version
-
-- Uses Python's hid library instead of HidLibrary
-- Uses pyusb instead of LibUsbDotNet
-- Uses vgamepad instead of Nefarius.ViGEm.Client
-- Tkinter GUI instead of Windows Forms
-- JSON settings file instead of .NET settings
+- **Windows**: HID access may require administrator privileges
+- **Linux**: Add your user to `input` group and install udev rules:
+  ```bash
+  sudo usermod -aG input $USER
+  sudo cp platform/linux/99-gc-controller.rules /etc/udev/rules.d/
+  sudo udevadm control --reload-rules
+  ```
+  Then log out and back in.
 
 ## License
 
-This Python version maintains the same open-source spirit as the original C# implementation. See the original LICENSE files for details.
-
-HidLibrary: MIT License
-
-LibUsbDotNet: GNU Lesser General Public License v3.0
-
-Nefarius.ViGEm.Client: MIT License
+See the original LICENSE files for details.

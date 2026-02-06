@@ -1,10 +1,166 @@
 {
-  "left_base": 32.0,
-  "left_bump": 190.0,
-  "left_max": 230.0,
-  "right_base": 32.0,
-  "right_bump": 190.0,
-  "right_max": 230.0,
-  "bump_100_percent": true,
-  "emulation_mode": "xbox360"
+  "version": 2,
+  "global": {
+    "auto_connect": true
+  },
+  "slots": {
+    "0": {
+      "trigger_left_base": 33.0,
+      "trigger_left_bump": 178.0,
+      "trigger_left_max": 223.0,
+      "trigger_right_base": 33.0,
+      "trigger_right_bump": 176.0,
+      "trigger_right_max": 216.0,
+      "trigger_bump_100_percent": false,
+      "emulation_mode": "xbox360",
+      "stick_left_center_x": 2104.0,
+      "stick_left_range_x": 1233.0,
+      "stick_left_center_y": 2057.5,
+      "stick_left_range_y": 1245.5,
+      "stick_right_center_x": 2164.0,
+      "stick_right_range_x": 1126.0,
+      "stick_right_center_y": 2079.5,
+      "stick_right_range_y": 1102.5,
+      "preferred_device_path": "1-1:1.0",
+      "connection_mode": "ble",
+      "preferred_ble_address": "3C:A9:AB:60:24:BF/P",
+      "stick_left_octagon": [
+        [
+          1.0,
+          0.006824568446407065
+        ],
+        [
+          0.7526358475263585,
+          0.7382577278201525
+        ],
+        [
+          -0.0332522303325223,
+          1.0
+        ],
+        [
+          -0.748580697485807,
+          0.711762344439984
+        ],
+        [
+          -1.0,
+          -0.012444801284624649
+        ],
+        [
+          -0.7420924574209246,
+          -0.7205941389000401
+        ],
+        [
+          0.0024330900243309003,
+          -1.0
+        ],
+        [
+          0.754257907542579,
+          -0.751103974307507
+        ]
+      ],
+      "stick_right_octagon": [
+        [
+          1.0,
+          -0.011337868480725623
+        ],
+        [
+          0.7380106571936057,
+          0.7251700680272108
+        ],
+        [
+          -0.009769094138543518,
+          1.0
+        ],
+        [
+          -0.7424511545293073,
+          0.7097505668934241
+        ],
+        [
+          -1.0,
+          0.02312925170068027
+        ],
+        [
+          -0.7326820603907638,
+          -0.6997732426303855
+        ],
+        [
+          0.04706927175843695,
+          -1.0
+        ],
+        [
+          0.7788632326820604,
+          -0.7396825396825397
+        ]
+      ]
+    },
+    "1": {
+      "trigger_left_base": 32.0,
+      "trigger_left_bump": 190.0,
+      "trigger_left_max": 230.0,
+      "trigger_right_base": 32.0,
+      "trigger_right_bump": 190.0,
+      "trigger_right_max": 230.0,
+      "trigger_bump_100_percent": false,
+      "emulation_mode": "xbox360",
+      "stick_left_center_x": 2048,
+      "stick_left_range_x": 2048,
+      "stick_left_center_y": 2048,
+      "stick_left_range_y": 2048,
+      "stick_right_center_x": 2048,
+      "stick_right_range_x": 2048,
+      "stick_right_center_y": 2048,
+      "stick_right_range_y": 2048,
+      "preferred_device_path": "",
+      "connection_mode": "usb",
+      "preferred_ble_address": "",
+      "stick_left_octagon": null,
+      "stick_right_octagon": null
+    },
+    "2": {
+      "trigger_left_base": 32.0,
+      "trigger_left_bump": 190.0,
+      "trigger_left_max": 230.0,
+      "trigger_right_base": 32.0,
+      "trigger_right_bump": 190.0,
+      "trigger_right_max": 230.0,
+      "trigger_bump_100_percent": false,
+      "emulation_mode": "xbox360",
+      "stick_left_center_x": 2048,
+      "stick_left_range_x": 2048,
+      "stick_left_center_y": 2048,
+      "stick_left_range_y": 2048,
+      "stick_right_center_x": 2048,
+      "stick_right_range_x": 2048,
+      "stick_right_center_y": 2048,
+      "stick_right_range_y": 2048,
+      "preferred_device_path": "",
+      "connection_mode": "usb",
+      "preferred_ble_address": "",
+      "stick_left_octagon": null,
+      "stick_right_octagon": null
+    },
+    "3": {
+      "trigger_left_base": 32.0,
+      "trigger_left_bump": 190.0,
+      "trigger_left_max": 230.0,
+      "trigger_right_base": 32.0,
+      "trigger_right_bump": 190.0,
+      "trigger_right_max": 230.0,
+      "trigger_bump_100_percent": false,
+      "emulation_mode": "xbox360",
+      "stick_left_center_x": 2048,
+      "stick_left_range_x": 2048,
+      "stick_left_center_y": 2048,
+      "stick_left_range_y": 2048,
+      "stick_right_center_x": 2048,
+      "stick_right_range_x": 2048,
+      "stick_right_center_y": 2048,
+      "stick_right_range_y": 2048,
+      "preferred_device_path": "",
+      "connection_mode": "usb",
+      "preferred_ble_address": "",
+      "stick_left_octagon": null,
+      "stick_right_octagon": null
+    }
+  }
 }

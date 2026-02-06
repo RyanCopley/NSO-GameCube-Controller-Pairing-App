@@ -2,11 +2,11 @@
 
 
 a = Analysis(
-    ['gc_controller_enabler.py'],
-    pathex=[],
+    ['src/gc_controller/__main__.py'],
+    pathex=['src'],
     binaries=[],
-    datas=[],
-    hiddenimports=['hid', 'usb.core', 'usb.util', 'tkinter', 'tkinter.ttk'],
+    datas=[('images/controller.png', '.'), ('images/stick_left.png', '.'), ('images/stick_right.png', '.')],
+    hiddenimports=['evdev', 'gc_controller.virtual_gamepad', 'gc_controller.controller_constants', 'gc_controller.settings_manager', 'gc_controller.calibration', 'gc_controller.connection_manager', 'gc_controller.emulation_manager', 'gc_controller.controller_ui', 'gc_controller.input_processor'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -29,10 +29,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['images/controller.png'],
 )

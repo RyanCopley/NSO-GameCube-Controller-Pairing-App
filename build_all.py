@@ -31,13 +31,13 @@ def build_executable():
     
     if system == "windows":
         output_dir = "dist/windows"
-        script_name = "build_windows.bat"
+        script_name = "./platform/windows/build.bat"
     elif system == "darwin":
         output_dir = "dist/macos"
-        script_name = "./build_macos.sh"
+        script_name = "./platform/macos/build.sh"
     elif system == "linux":
         output_dir = "dist/linux"
-        script_name = "./build_linux.sh"
+        script_name = "./platform/linux/build.sh"
     else:
         print(f"Unsupported platform: {system}")
         return False
@@ -70,7 +70,8 @@ def build_with_pyinstaller(output_dir):
         "--windowed" if platform.system() != "Linux" else "",
         "--name", "GC-Controller-Enabler",
         "--distpath", output_dir,
-        "gc_controller_enabler.py"
+        "--paths", "src",
+        "src/gc_controller/__main__.py"
     ]
     # Remove empty strings
     cmd = [c for c in cmd if c]
@@ -99,7 +100,12 @@ def check_dependencies():
     
     # Check main dependencies
     required_packages = ["tkinter", "threading", "json"]
-    optional_packages = ["hid", "usb", "vgamepad"]
+    if platform.system().lower() == "windows":
+        optional_packages = ["hid", "usb", "vgamepad"]
+    elif platform.system().lower() == "linux":
+        optional_packages = ["hid", "usb", "evdev"]
+    else:
+        optional_packages = ["hid", "usb"]
     
     for package in required_packages:
         try:

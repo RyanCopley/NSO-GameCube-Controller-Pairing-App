@@ -10,6 +10,7 @@
 *.userosscache
 *.sln.docstates
 *.env
+*.venv
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
@@ -339,6 +340,11 @@ paket-files/
 # Python Tools for Visual Studio (PTVS)
 **/__pycache__/
 *.pyc
+src/*.egg-info/
+
+# PyInstaller build artifacts
+dist/
+build/
 
 # Cake - Uncomment if you are using it
 #tools/**
