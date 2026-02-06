@@ -28,18 +28,23 @@ if os.path.exists(os.path.join('images', 'stick_right.png')):
 
 # Add vgamepad DLLs for Windows as binaries (not datas) so PyInstaller
 # resolves their transitive dependencies (MSVC runtime, etc.)
+# NOTE: We must NOT 'import vgamepad' here because that triggers CDLL()
+# loading of ViGEmClient.dll, which fails on CI (no ViGEmBus driver).
+# Instead, locate the package directory without importing it.
 if sys.platform == "win32":
     try:
-        import vgamepad
-        vgamepad_path = os.path.dirname(vgamepad.__file__)
-        vigem_dir = os.path.join(vgamepad_path, 'win', 'vigem')
-        if os.path.exists(vigem_dir):
-            for root, dirs, files in os.walk(vigem_dir):
-                for file in files:
-                    if file.endswith('.dll'):
-                        src_path = os.path.join(root, file)
-                        rel_path = os.path.relpath(root, vgamepad_path)
-                        binaries.append((src_path, f'vgamepad/{rel_path}/'))
+        import importlib.util
+        _spec = importlib.util.find_spec('vgamepad')
+        if _spec and _spec.submodule_search_locations:
+            vgamepad_path = _spec.submodule_search_locations[0]
+            vigem_dir = os.path.join(vgamepad_path, 'win', 'vigem')
+            if os.path.exists(vigem_dir):
+                for root, dirs, files in os.walk(vigem_dir):
+                    for file in files:
+                        if file.endswith('.dll'):
+                            src_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(root, vgamepad_path)
+                            binaries.append((src_path, f'vgamepad/{rel_path}/'))
     except Exception:
         pass
 
