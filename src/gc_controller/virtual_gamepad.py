@@ -16,15 +16,12 @@ from abc import ABC, abstractmethod
 from enum import Enum, auto
 
 
-def _setup_vgamepad_dll_path():
-    """Pre-load ViGEmClient.dll for vgamepad in frozen PyInstaller builds.
+_vgamepad_dll_diag = None  # Diagnostic info if DLL pre-load fails
 
-    Python 3.8+ changed DLL loading on Windows to use secure search flags.
-    We pre-load the DLL using legacy flags (winmode=0) so that when vgamepad
-    later calls CDLL(path), Windows finds it already in the process and
-    reuses the handle.  Also excludes ViGEmClient.dll from UPX compression
-    via the .spec file to avoid PE header corruption.
-    """
+
+def _setup_vgamepad_dll_path():
+    """Pre-load ViGEmClient.dll for vgamepad in frozen PyInstaller builds."""
+    global _vgamepad_dll_diag
     if sys.platform != "win32":
         return
     if not getattr(sys, 'frozen', False):
@@ -36,28 +33,47 @@ def _setup_vgamepad_dll_path():
 
     import platform
     import ctypes
+    import ctypes.wintypes
     arch = "x64" if platform.architecture()[0] == "64bit" else "x86"
     dll_dir = os.path.join(meipass, 'vgamepad', 'win', 'vigem', 'client', arch)
     dll_path = os.path.join(dll_dir, 'ViGEmClient.dll')
 
+    diag_lines = [f"arch={arch}", f"meipass={meipass}"]
+    diag_lines.append(f"dll_path={dll_path}")
+    diag_lines.append(f"exists={os.path.isfile(dll_path)}")
+    if os.path.isfile(dll_path):
+        diag_lines.append(f"size={os.path.getsize(dll_path)}")
+
+    # Add DLL directories to search path
+    for d in (meipass, dll_dir):
+        try:
+            os.add_dll_directory(d)
+        except (OSError, AttributeError):
+            pass
+    os.environ['PATH'] = dll_dir + os.pathsep + meipass + os.pathsep + os.environ.get('PATH', '')
+
     if not os.path.isfile(dll_path):
+        diag_lines.append("DLL file not found")
+        _vgamepad_dll_diag = "\n".join(diag_lines)
         return
 
-    # Add DLL directory to search path
-    try:
-        os.add_dll_directory(dll_dir)
-    except (OSError, AttributeError):
-        pass
-    os.environ['PATH'] = dll_dir + os.pathsep + os.environ.get('PATH', '')
+    # Try loading with different methods
+    methods = [
+        ("WinDLL+winmode0", lambda: ctypes.WinDLL(dll_path, winmode=0)),
+        ("CDLL+winmode0", lambda: ctypes.CDLL(dll_path, winmode=0)),
+        ("CDLL_default", lambda: ctypes.CDLL(dll_path)),
+        ("LoadLibrary", lambda: ctypes.windll.kernel32.LoadLibraryW(dll_path)),
+    ]
+    for name, loader in methods:
+        try:
+            result = loader()
+            diag_lines.append(f"{name}=OK (handle={result})")
+            _vgamepad_dll_diag = "\n".join(diag_lines)
+            return  # Success — DLL is loaded in the process
+        except Exception as e:
+            diag_lines.append(f"{name}=FAIL: {e}")
 
-    # Pre-load the DLL with legacy search behavior (winmode=0 uses
-    # LoadLibraryW instead of LoadLibraryExW with restrictive flags).
-    # Once loaded, subsequent CDLL() calls for the same path will reuse
-    # the already-loaded module handle.
-    try:
-        ctypes.WinDLL(dll_path, winmode=0)
-    except Exception:
-        pass
+    _vgamepad_dll_diag = "\n".join(diag_lines)
 
 
 _setup_vgamepad_dll_path()
@@ -647,18 +663,22 @@ def get_emulation_unavailable_reason(mode: str = 'xbox360') -> str:
                 "Install with: pip install vgamepad"
             )
         except OSError as e:
+            diag = _vgamepad_dll_diag or "no diagnostics"
             return (
-                "vgamepad failed to load its ViGEmClient DLL.\n\n"
+                f"vgamepad failed to load ViGEmClient DLL.\n\n"
                 f"Error: {e}\n\n"
-                "This usually means the ViGEmBus driver is not installed.\n"
-                "Download and install it from:\n"
-                "https://github.com/nefarius/ViGEmBus/releases\n\n"
-                "After installing, restart your computer."
+                f"Diagnostics:\n{diag}\n\n"
+                "Try installing the VC++ Redistributable:\n"
+                "https://aka.ms/vs/17/release/vc_redist.x64.exe\n\n"
+                "And ViGEmBus driver:\n"
+                "https://github.com/nefarius/ViGEmBus/releases"
             )
         except Exception as e:
+            diag = _vgamepad_dll_diag or "no diagnostics"
             return (
                 f"vgamepad failed to initialize.\n\n"
                 f"Error: {e}\n\n"
+                f"Diagnostics:\n{diag}\n\n"
                 "Make sure ViGEmBus driver is installed:\n"
                 "https://github.com/nefarius/ViGEmBus/releases"
             )

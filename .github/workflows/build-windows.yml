@@ -1,0 +1,30 @@
+name: Build Windows (test)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+        env:
+          VGAMEPAD_SKIP_VIGEMBUS_INSTALL: 'true'
+
+      - name: Build with PyInstaller
+        run: pyinstaller gc_controller_enabler.spec
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GC-Controller-Enabler-Windows
+          path: dist/GC-Controller-Enabler.exe
