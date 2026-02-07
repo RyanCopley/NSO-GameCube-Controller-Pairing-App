@@ -2,7 +2,7 @@
 
 import sys
 import os
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_all
 
 # Determine if we're building for Windows, macOS, or Linux
 if sys.platform == "win32":
@@ -17,9 +17,14 @@ else:  # Linux and other Unix-like systems
 
 block_cipher = None
 
+# Collect all customtkinter submodules + data files (themes, fonts, icons).
+# PyInstaller's auto-discovery of the customtkinter hook is unreliable on
+# macOS/Windows, so we explicitly collect everything here.
+ctk_datas, ctk_binaries, ctk_hiddenimports = collect_all("customtkinter")
+
 # Data files to include
-datas = collect_data_files("customtkinter")
-binaries = []
+datas = ctk_datas
+binaries = ctk_binaries
 if os.path.exists(os.path.join('images', 'controller.png')):
     datas.append((os.path.join('images', 'controller.png'), '.'))
 if os.path.exists(os.path.join('images', 'stick_left.png')):
@@ -79,8 +84,7 @@ hiddenimports = [
     'tkinter.ttk',
     '_tkinter',
     'PIL._tkinter_finder',
-    'customtkinter',
-]
+] + ctk_hiddenimports
 
 # Platform-conditional hidden imports
 if sys.platform == "win32":
