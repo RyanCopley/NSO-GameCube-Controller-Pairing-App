@@ -1,6 +1,8 @@
 {
   "version": 2,
   "global": {
+    "trigger_bump_100_percent": false,
+    "emulation_mode": "xbox360",
     "auto_connect": true
   },
   "slots": {
@@ -11,8 +13,6 @@
       "trigger_right_base": 33.0,
       "trigger_right_bump": 176.0,
       "trigger_right_max": 216.0,
-      "trigger_bump_100_percent": false,
-      "emulation_mode": "xbox360",
       "stick_left_center_x": 2104.0,
       "stick_left_range_x": 1233.0,
       "stick_left_center_y": 2057.5,
@@ -23,7 +23,7 @@
       "stick_right_range_y": 1102.5,
       "preferred_device_path": "1-1:1.0",
       "connection_mode": "ble",
-      "preferred_ble_address": "3C:A9:AB:60:24:BF/P",
+      "preferred_ble_address": "3C:A9:AB:60:24:BF",
       "stick_left_octagon": [
         [
           1.0,
@@ -100,8 +100,6 @@
       "trigger_right_base": 32.0,
       "trigger_right_bump": 190.0,
       "trigger_right_max": 230.0,
-      "trigger_bump_100_percent": false,
-      "emulation_mode": "xbox360",
       "stick_left_center_x": 2048,
       "stick_left_range_x": 2048,
       "stick_left_center_y": 2048,
@@ -111,8 +109,8 @@
       "stick_right_center_y": 2048,
       "stick_right_range_y": 2048,
       "preferred_device_path": "",
-      "connection_mode": "usb",
-      "preferred_ble_address": "",
+      "connection_mode": "ble",
+      "preferred_ble_address": "3C:A9:AB:60:24:BF/P",
       "stick_left_octagon": null,
       "stick_right_octagon": null
     },
@@ -123,8 +121,6 @@
       "trigger_right_base": 32.0,
       "trigger_right_bump": 190.0,
       "trigger_right_max": 230.0,
-      "trigger_bump_100_percent": false,
-      "emulation_mode": "xbox360",
       "stick_left_center_x": 2048,
       "stick_left_range_x": 2048,
       "stick_left_center_y": 2048,
@@ -146,8 +142,6 @@
       "trigger_right_base": 32.0,
       "trigger_right_bump": 190.0,
       "trigger_right_max": 230.0,
-      "trigger_bump_100_percent": false,
-      "emulation_mode": "xbox360",
       "stick_left_center_x": 2048,
       "stick_left_range_x": 2048,
       "stick_left_center_y": 2048,

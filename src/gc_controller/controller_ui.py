@@ -325,15 +325,10 @@ class ControllerUI:
 
     def _refresh_tab_title(self, slot_index: int):
         """Rebuild tab title from connection, emulation, and dirty state."""
+        prefix = "\u2713 " if self._slot_connected[slot_index] else ""
         base = f"Controller {slot_index + 1}"
-        if self._slot_emulating[slot_index]:
-            suffix = " [EMU]"
-        elif self._slot_connected[slot_index]:
-            suffix = " [ON]"
-        else:
-            suffix = ""
         dirty = " *" if self._slot_dirty[slot_index] else ""
-        new_name = base + suffix + dirty
+        new_name = prefix + base + dirty
         old_name = self._tab_names[slot_index]
 
         if new_name != old_name:

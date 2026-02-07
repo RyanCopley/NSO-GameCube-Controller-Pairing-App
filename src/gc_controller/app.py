@@ -81,7 +81,7 @@ class GCControllerEnabler:
         self.root = customtkinter.CTk()
         self.root.title("NSO Game Cube Controller Pairing App")
         self.root.configure(fg_color="#3B1F6E")
-        self.root.minsize(600, 540)
+        self.root.minsize(640, 540)
 
         # Per-slot calibration dicts
         self.slot_calibrations = [dict(DEFAULT_CALIBRATION) for _ in range(MAX_SLOTS)]
@@ -952,7 +952,7 @@ class GCControllerEnabler:
         try:
             slot.emu_mgr.start('xbox360', slot_index=slot_index,
                                rumble_callback=self._make_rumble_callback(slot_index))
-            self.ui.update_emu_status(slot_index, "Xbox 360 active")
+            self.ui.update_emu_status(slot_index, "Connected & Ready")
             self.ui.update_tab_status(slot_index, connected=True, emulating=True)
         except Exception as e:
             self._messagebox.showerror("Emulation Error",
@@ -969,7 +969,7 @@ class GCControllerEnabler:
         cancel = threading.Event()
         slot._pipe_cancel = cancel
         self.ui.update_emu_status(
-            slot_index, f"Waiting for Dolphin to read {pipe_name}...")
+            slot_index, "Waiting for Dolphin...")
 
         def _connect():
             try:
@@ -985,9 +985,8 @@ class GCControllerEnabler:
         """Called on the main thread when a dolphin pipe successfully opens."""
         slot = self.slots[slot_index]
         slot._pipe_cancel = None
-        pipe_name = f'gc_controller_{slot_index + 1}'
         self.ui.update_emu_status(
-            slot_index, f"Dolphin pipe active ({pipe_name})")
+            slot_index, "Connected & Ready")
         self.ui.update_tab_status(slot_index, connected=True, emulating=True)
 
     def _on_pipe_failed(self, slot_index: int, error: Exception):
