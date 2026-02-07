@@ -2,6 +2,7 @@
 
 import sys
 import os
+from PyInstaller.utils.hooks import collect_data_files
 
 # Determine if we're building for Windows, macOS, or Linux
 if sys.platform == "win32":
@@ -17,7 +18,7 @@ else:  # Linux and other Unix-like systems
 block_cipher = None
 
 # Data files to include
-datas = []
+datas = collect_data_files("customtkinter")
 binaries = []
 if os.path.exists(os.path.join('images', 'controller.png')):
     datas.append((os.path.join('images', 'controller.png'), '.'))
