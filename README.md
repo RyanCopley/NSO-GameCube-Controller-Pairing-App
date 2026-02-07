@@ -2,7 +2,9 @@
 
 # NSO GameCube Controller Pairing App
 
-A cross-platform Python/Tkinter tool that connects Nintendo Switch Online GameCube controllers via USB or Bluetooth and makes them usable on Steam and other platforms through Xbox 360 controller emulation. Supports up to 4 simultaneous controllers.
+A cross-platform Python/Tkinter tool that connects the [Nintendo Switch Online GameCube Controller](https://www.nintendo.com/us/store/products/nintendo-switch-2-nintendo-gamecube-controller-120833/) via USB or Bluetooth and makes it usable on Steam and other platforms through Xbox 360 controller emulation. Supports up to 4 simultaneous controllers.
+
+> **Note:** This app is designed specifically for the **NSO GameCube Controller** (Vendor ID `0x057e`, Product ID `0x2073`). A [Nintendo Switch Online](https://www.nintendo.com/us/switch/online/) membership ($3.99/month) is required to purchase the controller from the Nintendo Store, but only needs to be active for one month.
 
 ## Features
 
