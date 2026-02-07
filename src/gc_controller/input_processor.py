@@ -80,6 +80,7 @@ def _translate_report_0x05(data) -> list:
     b5 = 0
     if b1_nso & 0x10: b5 |= 0x01  # Home
     if b1_nso & 0x20: b5 |= 0x02  # Capture
+    if b1_nso & 0x40: b5 |= 0x10  # Chat
     buf[5] = b5
 
     # Sticks: raw bytes 11-16 -> GC bytes 6-11
