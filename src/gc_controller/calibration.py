@@ -165,29 +165,29 @@ class CalibrationManager:
 
         if step == 0:
             self.trigger_cal_step = 1
-            return (1, "Record Unpressed", "Release both triggers, then click Record Unpressed")
+            return (1, "Continue", "Release both triggers, then click Continue")
         elif step == 1:
             self._calibration['trigger_left_base'] = float(self.trigger_cal_last_left)
             self._calibration['trigger_right_base'] = float(self.trigger_cal_last_right)
             self.trigger_cal_step = 2
-            return (2, "Record Left Bump", "Push LEFT trigger to analog max (before click)")
+            return (2, "Continue", "Push LEFT trigger to analog max (before click)")
         elif step == 2:
             self._calibration['trigger_left_bump'] = float(self.trigger_cal_last_left)
             self.trigger_cal_step = 3
-            return (3, "Record Left Max", "Fully press LEFT trigger past the bump")
+            return (3, "Continue", "Fully press LEFT trigger past the bump")
         elif step == 3:
             self._calibration['trigger_left_max'] = float(self.trigger_cal_last_left)
             self.trigger_cal_step = 4
-            return (4, "Record Right Bump", "Push RIGHT trigger to analog max (before click)")
+            return (4, "Continue", "Push RIGHT trigger to analog max (before click)")
         elif step == 4:
             self._calibration['trigger_right_bump'] = float(self.trigger_cal_last_right)
             self.trigger_cal_step = 5
-            return (5, "Record Right Max", "Fully press RIGHT trigger past the bump")
+            return (5, "Continue", "Fully press RIGHT trigger past the bump")
         elif step == 5:
             self._calibration['trigger_right_max'] = float(self.trigger_cal_last_right)
             self._cached_calibration = self._calibration.copy()
             self.trigger_cal_step = 0
-            return (0, "Calibrate Triggers", "Calibration complete!")
+            return (0, "Calibrate Triggers", "Trigger calibration completed")
 
     # ── Hot-path trigger calibration ─────────────────────────────────
 

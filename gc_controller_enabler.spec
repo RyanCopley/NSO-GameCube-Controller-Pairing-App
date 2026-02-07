@@ -26,6 +26,19 @@ if os.path.exists(os.path.join('images', 'stick_left.png')):
 if os.path.exists(os.path.join('images', 'stick_right.png')):
     datas.append((os.path.join('images', 'stick_right.png'), '.'))
 
+# Bundled font
+_font_path = os.path.join('src', 'gc_controller', 'fonts', 'VarelaRound-Regular.ttf')
+if os.path.exists(_font_path):
+    datas.append((_font_path, os.path.join('gc_controller', 'fonts')))
+
+# Bundled controller PNG assets
+_assets_dir = os.path.join('src', 'gc_controller', 'assets', 'controller')
+if os.path.isdir(_assets_dir):
+    for f in os.listdir(_assets_dir):
+        if f.endswith('.png'):
+            datas.append((os.path.join(_assets_dir, f),
+                          os.path.join('gc_controller', 'assets', 'controller')))
+
 # Add vgamepad DLLs for Windows as binaries (not datas) so PyInstaller
 # resolves their transitive dependencies (MSVC runtime, etc.)
 # NOTE: We must NOT 'import vgamepad' here because that triggers CDLL()
@@ -64,6 +77,7 @@ hiddenimports = [
     'tkinter',
     'tkinter.ttk',
     '_tkinter',
+    'PIL._tkinter_finder',
 ]
 
 # Platform-conditional hidden imports

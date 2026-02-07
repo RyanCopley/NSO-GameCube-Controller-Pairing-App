@@ -13,7 +13,7 @@ from .controller_constants import DEFAULT_CALIBRATION, MAX_SLOTS
 
 
 # Keys that belong in per-slot settings (everything except global keys)
-_GLOBAL_KEYS = {'auto_connect'}
+_GLOBAL_KEYS = {'auto_connect', 'emulation_mode', 'trigger_bump_100_percent'}
 
 
 class SettingsManager:
@@ -76,9 +76,10 @@ class SettingsManager:
                         slot_data.setdefault(key, global_settings[key])
             self._slot_calibrations[i].update(slot_data)
 
-        # Ensure auto_connect is accessible from slot 0
-        if 'auto_connect' in global_settings:
-            self._slot_calibrations[0]['auto_connect'] = global_settings['auto_connect']
+        # Ensure global keys are accessible from slot 0
+        for key in _GLOBAL_KEYS:
+            if key in global_settings:
+                self._slot_calibrations[0][key] = global_settings[key]
 
     def save(self):
         """Write all slot calibrations in v2 format. Raises on failure."""

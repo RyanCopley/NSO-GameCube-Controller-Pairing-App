@@ -70,14 +70,18 @@ class GCControllerEnabler:
     def __init__(self):
         import tkinter as tk
         from tkinter import messagebox
+        import customtkinter
         from .controller_ui import ControllerUI
+        from .ui_theme import apply_gc_theme
 
         self._tk = tk
         self._messagebox = messagebox
 
-        self.root = tk.Tk()
-        self.root.title("GameCube Controller Enabler")
-        self.root.resizable(False, False)
+        apply_gc_theme()
+        self.root = customtkinter.CTk()
+        self.root.title("NSO Game Cube Controller Pairing App")
+        self.root.configure(fg_color="#535486")
+        self.root.minsize(720, 540)
 
         # Per-slot calibration dicts
         self.slot_calibrations = [dict(DEFAULT_CALIBRATION) for _ in range(MAX_SLOTS)]
@@ -117,26 +121,18 @@ class GCControllerEnabler:
             slot_calibrations=self.slot_calibrations,
             slot_cal_mgrs=[s.cal_mgr for s in self.slots],
             on_connect=self.connect_controller,
-            on_emulate=self.toggle_emulation,
             on_stick_cal=self.toggle_stick_calibration,
             on_trigger_cal=self.trigger_cal_step,
             on_save=self.save_settings,
-            on_refresh=self.refresh_devices,
             on_pair=self.pair_controller if self._ble_available else None,
-            on_test_rumble=self.test_rumble,
+            on_emulate_all=self.toggle_emulation_all,
+            on_test_rumble_all=self.test_rumble_all,
             ble_available=self._ble_available,
         )
 
         # Now that UI is built, draw initial trigger markers for all slots
         for i in range(MAX_SLOTS):
             self.ui.draw_trigger_markers(i)
-
-        # Populate device dropdowns and restore saved selections
-        self.refresh_devices()
-        for i in range(MAX_SLOTS):
-            saved = self.slot_calibrations[i].get('preferred_device_path', '')
-            if saved:
-                self.ui.select_device_by_path(i, saved.encode('utf-8'))
 
         # Handle window closing
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -165,28 +161,12 @@ class GCControllerEnabler:
             if i != slot_index and s.is_connected and s.conn_mgr.device_path:
                 claimed_paths.add(s.conn_mgr.device_path)
 
-        # Check if user selected a specific device
-        selected_path = self.ui.get_selected_device_path(slot_index)
-
-        if selected_path is not None:
-            # User picked a specific device
-            if selected_path in claimed_paths:
-                self.ui.update_status(slot_index,
-                                      "Selected device is in use by another slot")
-                return
-            # Verify it still exists
-            if not any(d['path'] == selected_path for d in all_hid):
-                self.ui.update_status(slot_index,
-                                      "Selected device not found — try Refresh")
-                return
-            target_path = selected_path
-        else:
-            # Auto — pick first unclaimed
-            available = [d for d in all_hid if d['path'] not in claimed_paths]
-            if not available:
-                self.ui.update_status(slot_index, "No unclaimed controllers found")
-                return
-            target_path = available[0]['path']
+        # Auto — pick first unclaimed
+        available = [d for d in all_hid if d['path'] not in claimed_paths]
+        if not available:
+            self.ui.update_status(slot_index, "No unclaimed controllers found")
+            return
+        target_path = available[0]['path']
 
         # Initialize all USB devices (send init data)
         usb_devices = ConnectionManager.enumerate_usb_devices()
@@ -208,10 +188,10 @@ class GCControllerEnabler:
 
         slot.input_proc.start()
 
-        sui.connect_btn.config(text="Disconnect")
-        sui.emulate_btn.config(state='normal')
+        sui.connect_btn.configure(text="Disconnect USB")
+        if sui.pair_btn:
+            sui.pair_btn.configure(state='disabled')
         self.ui.update_tab_status(slot_index, connected=True, emulating=False)
-        self.refresh_devices()
         self.toggle_emulation(slot_index)
 
     def _reset_rumble(self, slot_index: int):
@@ -247,13 +227,12 @@ class GCControllerEnabler:
         slot.conn_mgr.disconnect()
         slot.device_path = None
 
-        sui.connect_btn.config(text="Connect")
-        sui.emulate_btn.config(state='disabled', text="Start Emulation")
-        sui.test_rumble_btn.config(state='disabled')
+        sui.connect_btn.configure(text="Connect USB")
+        if sui.pair_btn:
+            sui.pair_btn.configure(state='normal')
         self.ui.update_status(slot_index, "Disconnected")
         self.ui.reset_slot_ui(slot_index)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
-        self.refresh_devices()
 
     # ── BLE subprocess helpers ────────────────────────────────────────
 
@@ -495,7 +474,7 @@ class GCControllerEnabler:
 
         # Disable pair button during pairing
         if sui.pair_btn:
-            sui.pair_btn.config(state='disabled')
+            sui.pair_btn.configure(state='disabled')
         self.ui.update_ble_status(slot_index, "Initializing...")
 
         # Drain any stale data from the queue
@@ -528,14 +507,14 @@ class GCControllerEnabler:
 
     def _on_devices_found(self, slot_index: int, devices: list[dict]):
         """Handle devices_found event: show picker dialog, then connect."""
-        from .controller_ui import BLEDevicePickerDialog
+        from .ui_ble_dialog import BLEDevicePickerDialog
 
         sui = self.ui.slots[slot_index]
 
         if not devices:
             self.ui.update_ble_status(slot_index, "No devices found")
             if sui.pair_btn:
-                sui.pair_btn.config(state='normal')
+                sui.pair_btn.configure(state='normal')
             return
 
         picker = BLEDevicePickerDialog(self.root, devices)
@@ -545,7 +524,7 @@ class GCControllerEnabler:
             # User cancelled
             self.ui.update_ble_status(slot_index, "Pairing cancelled")
             if sui.pair_btn:
-                sui.pair_btn.config(state='normal')
+                sui.pair_btn.configure(state='normal')
             return
 
         # Send connect_device with the chosen address
@@ -578,16 +557,16 @@ class GCControllerEnabler:
             # Start input processor in BLE mode
             slot.input_proc.start(mode='ble')
 
-            sui.emulate_btn.config(state='normal')
             if sui.pair_btn:
-                sui.pair_btn.config(text="Disconnect BLE", state='normal')
+                sui.pair_btn.configure(text="Disconnect", state='normal')
+            sui.connect_btn.configure(state='disabled')
             self.ui.update_ble_status(slot_index, f"Connected: {mac}")
             self.ui.update_status(slot_index, "Connected via BLE")
             self.ui.update_tab_status(slot_index, connected=True, emulating=False)
             self.toggle_emulation(slot_index)
         else:
             if sui.pair_btn:
-                sui.pair_btn.config(state='normal')
+                sui.pair_btn.configure(state='normal')
             if error:
                 self.ui.update_ble_status(slot_index, f"Error: {error}")
             # Status was already set by on_status callback
@@ -618,9 +597,8 @@ class GCControllerEnabler:
         slot.ble_connected = False
 
         if sui.pair_btn:
-            sui.pair_btn.config(text="Pair Controller", state='normal')
-        sui.emulate_btn.config(state='disabled', text="Start Emulation")
-        sui.test_rumble_btn.config(state='disabled')
+            sui.pair_btn.configure(text="Pair Controller", state='normal')
+        sui.connect_btn.configure(state='normal')
         self.ui.update_status(slot_index, "Disconnected")
         self.ui.reset_slot_ui(slot_index)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
@@ -642,9 +620,7 @@ class GCControllerEnabler:
         self.ui.update_status(slot_index, "BLE disconnected — reconnecting...")
         self.ui.update_ble_status(slot_index, "Reconnecting...")
         if sui.pair_btn:
-            sui.pair_btn.config(state='disabled')
-        sui.emulate_btn.config(state='disabled')
-        sui.test_rumble_btn.config(state='disabled')
+            sui.pair_btn.configure(state='disabled')
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
         self._attempt_ble_reconnect(slot_index)
@@ -659,8 +635,9 @@ class GCControllerEnabler:
             self.ui.update_ble_status(slot_index, "")
             self.ui.reset_slot_ui(slot_index)
             if self.ui.slots[slot_index].pair_btn:
-                self.ui.slots[slot_index].pair_btn.config(
+                self.ui.slots[slot_index].pair_btn.configure(
                     text="Pair Controller", state='normal')
+            self.ui.slots[slot_index].connect_btn.configure(state='normal')
             self.ui.update_tab_status(slot_index, connected=False, emulating=False)
             return
 
@@ -696,9 +673,9 @@ class GCControllerEnabler:
         slot.input_proc.start(mode='ble')
 
         sui = self.ui.slots[slot_index]
-        sui.emulate_btn.config(state='normal')
         if sui.pair_btn:
-            sui.pair_btn.config(text="Disconnect BLE", state='normal')
+            sui.pair_btn.configure(text="Disconnect", state='normal')
+        sui.connect_btn.configure(state='disabled')
         self.ui.update_status(slot_index, "Reconnected via BLE")
         self.ui.update_ble_status(slot_index, f"Connected: {mac}")
         self.ui.update_tab_status(slot_index, connected=True, emulating=False)
@@ -742,8 +719,9 @@ class GCControllerEnabler:
                     claimed_paths.add(pref_bytes)
                     slot.device_path = pref_bytes
                     slot.input_proc.start()
-                    sui.connect_btn.config(text="Disconnect")
-                    sui.emulate_btn.config(state='normal')
+                    sui.connect_btn.configure(text="Disconnect USB")
+                    if sui.pair_btn:
+                        sui.pair_btn.configure(state='disabled')
                     self.ui.update_tab_status(i, connected=True, emulating=False)
                     self.toggle_emulation(i)
 
@@ -767,27 +745,11 @@ class GCControllerEnabler:
                 claimed_paths.add(path)
                 slot.device_path = path
                 slot.input_proc.start()
-                sui.connect_btn.config(text="Disconnect")
-                sui.emulate_btn.config(state='normal')
+                sui.connect_btn.configure(text="Disconnect USB")
+                if sui.pair_btn:
+                    sui.pair_btn.configure(state='disabled')
                 self.ui.update_tab_status(i, connected=True, emulating=False)
                 self.toggle_emulation(i)
-
-        self.refresh_devices()
-
-    # ── Device enumeration ────────────────────────────────────────────
-
-    def refresh_devices(self):
-        """Refresh device dropdowns for all slots."""
-        all_hid = ConnectionManager.enumerate_devices()
-
-        # Build a map of claimed paths -> slot index
-        claimed_map = {}
-        for i, s in enumerate(self.slots):
-            if s.is_connected and s.conn_mgr.device_path:
-                claimed_map[s.conn_mgr.device_path] = i
-
-        for i in range(MAX_SLOTS):
-            self.ui.set_device_list(i, all_hid, claimed_map)
 
     # ── Auto-reconnect ──────────────────────────────────────────────
 
@@ -809,9 +771,9 @@ class GCControllerEnabler:
             slot.emu_mgr.stop()
 
         self.ui.update_status(slot_index, "Controller disconnected — reconnecting...")
-        sui.connect_btn.config(text="Connect")
-        sui.emulate_btn.config(state='disabled')
-        sui.test_rumble_btn.config(state='disabled')
+        sui.connect_btn.configure(text="Connect USB")
+        if sui.pair_btn:
+            sui.pair_btn.configure(state='normal')
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
         self._attempt_reconnect(slot_index)
@@ -868,11 +830,11 @@ class GCControllerEnabler:
             if slot.conn_mgr.init_hid_device(device_path=target_path):
                 slot.device_path = target_path
                 slot.input_proc.start()
-                sui.connect_btn.config(text="Disconnect")
-                sui.emulate_btn.config(state='normal')
+                sui.connect_btn.configure(text="Disconnect USB")
+                if sui.pair_btn:
+                    sui.pair_btn.configure(state='disabled')
                 self.ui.update_status(slot_index, "Reconnected")
                 self.ui.update_tab_status(slot_index, connected=True, emulating=False)
-                self.refresh_devices()
 
                 if slot.reconnect_was_emulating:
                     slot.reconnect_was_emulating = False
@@ -885,6 +847,24 @@ class GCControllerEnabler:
 
     # ── Emulation ────────────────────────────────────────────────────
 
+    def toggle_emulation_all(self):
+        """Start or stop emulation on all connected controllers."""
+        any_emulating = any(s.emu_mgr.is_emulating for s in self.slots)
+        for i, slot in enumerate(self.slots):
+            if any_emulating:
+                # Stop all emulating slots
+                if slot.emu_mgr.is_emulating or getattr(slot, '_pipe_cancel', None):
+                    self.toggle_emulation(i)
+            else:
+                # Start emulation on all connected slots
+                if slot.is_connected and not slot.emu_mgr.is_emulating:
+                    self.toggle_emulation(i)
+
+    def test_rumble_all(self):
+        """Send a short rumble burst on all emulating controllers."""
+        for i in range(MAX_SLOTS):
+            self.test_rumble(i)
+
     def toggle_emulation(self, slot_index: int):
         """Start or stop controller emulation for a specific slot."""
         try:
@@ -896,7 +876,6 @@ class GCControllerEnabler:
     def _toggle_emulation_inner(self, slot_index: int):
         """Inner implementation of toggle_emulation."""
         slot = self.slots[slot_index]
-        sui = self.ui.slots[slot_index]
 
         if slot.emu_mgr.is_emulating or getattr(slot, '_pipe_cancel', None):
             # Cancel a pending dolphin pipe wait, or stop active emulation.
@@ -905,12 +884,10 @@ class GCControllerEnabler:
                 cancel.set()
                 slot._pipe_cancel = None
             slot.emu_mgr.stop()
-            sui.emulate_btn.config(text="Start Emulation")
-            sui.test_rumble_btn.config(state='disabled')
             self.ui.update_emu_status(slot_index, "")
             self.ui.update_tab_status(slot_index, connected=slot.is_connected, emulating=False)
         else:
-            mode = sui.emu_mode_var.get()
+            mode = self.ui.emu_mode_var.get()
 
             if not is_emulation_available(mode):
                 self._messagebox.showerror(
@@ -948,7 +925,6 @@ class GCControllerEnabler:
     def test_rumble(self, slot_index: int):
         """Send a short rumble burst (~500ms) to test the motor."""
         slot = self.slots[slot_index]
-        sui = self.ui.slots[slot_index]
 
         if not slot.emu_mgr.is_emulating:
             return
@@ -969,9 +945,6 @@ class GCControllerEnabler:
         elif slot.conn_mgr.device:
             slot.conn_mgr.send_rumble(True)
 
-        # Disable button during test
-        sui.test_rumble_btn.config(state='disabled')
-
         # Schedule rumble OFF after 500ms
         def _stop_rumble():
             slot.rumble_state = False
@@ -987,22 +960,15 @@ class GCControllerEnabler:
             elif slot.conn_mgr.device:
                 slot.conn_mgr.send_rumble(False)
 
-            # Re-enable button if still emulating
-            if slot.emu_mgr.is_emulating:
-                sui.test_rumble_btn.config(state='normal')
-
         self.root.after(500, _stop_rumble)
 
     def _start_xbox360_emulation(self, slot_index: int):
         """Start Xbox 360 emulation synchronously."""
         slot = self.slots[slot_index]
-        sui = self.ui.slots[slot_index]
         try:
             slot.emu_mgr.start('xbox360', slot_index=slot_index,
                                rumble_callback=self._make_rumble_callback(slot_index))
-            sui.emulate_btn.config(text="Stop Emulation")
-            sui.test_rumble_btn.config(state='normal')
-            self.ui.update_emu_status(slot_index, "Xbox 360 active")
+            self.ui.update_emu_status(slot_index, "Connected & Ready")
             self.ui.update_tab_status(slot_index, connected=True, emulating=True)
         except Exception as e:
             self._messagebox.showerror("Emulation Error",
@@ -1011,18 +977,15 @@ class GCControllerEnabler:
     def _start_dolphin_pipe_emulation(self, slot_index: int):
         """Start Dolphin pipe emulation on a background thread.
 
-        Polls until Dolphin opens the read end of the pipe.  The button
-        switches to 'Cancel' so the user can abort the wait.
+        Polls until Dolphin opens the read end of the pipe.
         """
         slot = self.slots[slot_index]
-        sui = self.ui.slots[slot_index]
         pipe_name = f'gc_controller_{slot_index + 1}'
 
         cancel = threading.Event()
         slot._pipe_cancel = cancel
-        sui.emulate_btn.config(text="Cancel")
         self.ui.update_emu_status(
-            slot_index, f"Waiting for Dolphin to read {pipe_name}...")
+            slot_index, "Waiting for Dolphin...")
 
         def _connect():
             try:
@@ -1037,21 +1000,16 @@ class GCControllerEnabler:
     def _on_pipe_connected(self, slot_index: int):
         """Called on the main thread when a dolphin pipe successfully opens."""
         slot = self.slots[slot_index]
-        sui = self.ui.slots[slot_index]
         slot._pipe_cancel = None
-        pipe_name = f'gc_controller_{slot_index + 1}'
-        sui.emulate_btn.config(text="Stop Emulation")
         self.ui.update_emu_status(
-            slot_index, f"Dolphin pipe active ({pipe_name})")
+            slot_index, "Connected & Ready")
         self.ui.update_tab_status(slot_index, connected=True, emulating=True)
 
     def _on_pipe_failed(self, slot_index: int, error: Exception):
         """Called on the main thread when dolphin pipe open fails or is cancelled."""
         slot = self.slots[slot_index]
-        sui = self.ui.slots[slot_index]
         slot._pipe_cancel = None
         slot.emu_mgr.stop()
-        sui.emulate_btn.config(text="Start Emulation")
         self.ui.update_emu_status(slot_index, "")
         self.ui.update_tab_status(slot_index, connected=slot.is_connected, emulating=False)
         if getattr(error, 'errno', None) != errno.ECANCELED:
@@ -1067,14 +1025,15 @@ class GCControllerEnabler:
 
         if slot.cal_mgr.stick_calibrating:
             slot.cal_mgr.finish_stick_calibration()
-            self.ui.redraw_octagons(slot_index)
-            sui.stick_cal_btn.config(text="Calibrate Sticks")
-            sui.stick_cal_status.config(text="Calibration complete!")
+            self.ui.set_calibration_mode(slot_index, False)
+            sui.stick_cal_btn.configure(text="Calibrate Sticks")
+            sui.stick_cal_status.configure(text="Calibration complete!")
             self.ui.mark_slot_dirty(slot_index)
         else:
+            self.ui.set_calibration_mode(slot_index, True)
             slot.cal_mgr.start_stick_calibration()
-            sui.stick_cal_btn.config(text="Finish Calibration")
-            sui.stick_cal_status.config(text="Move sticks to all extremes...")
+            sui.stick_cal_btn.configure(text="Finish Calibration")
+            sui.stick_cal_status.configure(text="Move sticks to all extremes...")
 
     # ── Trigger calibration ──────────────────────────────────────────
 
@@ -1086,8 +1045,8 @@ class GCControllerEnabler:
         result = slot.cal_mgr.trigger_cal_next_step()
         if result is not None:
             step, btn_text, status_text = result
-            sui.trigger_cal_btn.config(text=btn_text)
-            sui.trigger_cal_status.config(text=status_text)
+            sui.trigger_cal_btn.configure(text=btn_text)
+            self.ui.update_status(slot_index, status_text)
             if step == 0:
                 # Wizard finished — redraw markers
                 self.ui.draw_trigger_markers(slot_index)
@@ -1097,26 +1056,22 @@ class GCControllerEnabler:
 
     def update_calibration_from_ui(self):
         """Update calibration values from UI variables for all slots."""
-        for i in range(MAX_SLOTS):
-            sui = self.ui.slots[i]
-            cal = self.slot_calibrations[i]
-            cal['trigger_bump_100_percent'] = sui.trigger_mode_var.get()
-            cal['emulation_mode'] = sui.emu_mode_var.get()
-            self.slots[i].cal_mgr.refresh_cache()
+        # Global settings stored in slot 0's calibration
+        self.slot_calibrations[0]['auto_connect'] = self.ui.auto_connect_var.get()
+        self.slot_calibrations[0]['emulation_mode'] = self.ui.emu_mode_var.get()
+        self.slot_calibrations[0]['trigger_bump_100_percent'] = self.ui.trigger_mode_var.get()
 
-            # Save preferred device path from dropdown (or from last connection)
-            selected = self.ui.get_selected_device_path(i)
-            if selected is not None:
-                cal['preferred_device_path'] = selected.decode('utf-8', errors='replace')
+        for i in range(MAX_SLOTS):
+            cal = self.slot_calibrations[i]
+            cal['trigger_bump_100_percent'] = self.ui.trigger_mode_var.get()
+            cal['emulation_mode'] = self.ui.emu_mode_var.get()
+            self.slots[i].cal_mgr.refresh_cache()
 
             # Save BLE state
             slot = self.slots[i]
             cal['connection_mode'] = slot.connection_mode
             if slot.ble_address:
                 cal['preferred_ble_address'] = slot.ble_address
-
-        # Global settings stored in slot 0's calibration
-        self.slot_calibrations[0]['auto_connect'] = self.ui.auto_connect_var.get()
 
     def save_settings(self):
         """Save calibration settings for all slots to file."""
@@ -1151,18 +1106,18 @@ class GCControllerEnabler:
                          left_trigger, right_trigger, button_states,
                          stick_calibrating):
         """Apply UI updates on the main thread for a specific slot."""
-        s = self.ui.slots[slot_index]
+        try:
+            self.ui.update_stick_position(slot_index, 'left', left_x, left_y)
+            self.ui.update_stick_position(slot_index, 'right', right_x, right_y)
+            self.ui.update_trigger_display(slot_index, left_trigger, right_trigger)
+            self.ui.update_button_display(slot_index, button_states)
 
-        self.ui.update_stick_position(
-            s.left_stick_canvas, s.left_stick_dot, left_x, left_y)
-        self.ui.update_stick_position(
-            s.right_stick_canvas, s.right_stick_dot, right_x, right_y)
-        self.ui.update_trigger_display(slot_index, left_trigger, right_trigger)
-        self.ui.update_button_display(slot_index, button_states)
-
-        if stick_calibrating:
-            self.ui.draw_octagon_live(slot_index, 'left')
-            self.ui.draw_octagon_live(slot_index, 'right')
+            if stick_calibrating:
+                self.ui.draw_octagon_live(slot_index, 'left')
+                self.ui.draw_octagon_live(slot_index, 'right')
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
 
     # ── Lifecycle ────────────────────────────────────────────────────
 

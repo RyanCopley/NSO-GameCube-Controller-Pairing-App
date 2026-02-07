@@ -10,6 +10,8 @@ requires-python = ">=3.7"
 dependencies = [
     "hidapi>=0.14.0",
     "pyusb>=1.2.1",
+    "customtkinter>=5.2.0",
+    "Pillow>=9.0.0",
     "vgamepad>=0.0.8; sys_platform == 'win32'",
     "evdev>=1.7.0; sys_platform == 'linux'",
     "bleak>=0.21.0; sys_platform == 'darwin'",
@@ -21,3 +23,6 @@ gc-controller = "gc_controller.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+gc_controller = ["assets/controller/*.png", "fonts/*.ttf"]
