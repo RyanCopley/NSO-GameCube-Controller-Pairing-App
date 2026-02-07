@@ -35,7 +35,15 @@ jobs:
         run: pyinstaller gc_controller_enabler.spec
 
       - name: Zip artifact
-        run: cd dist && zip NSO-GameCube-Controller-Pairing-App-Linux.zip NSO-GameCube-Controller-Pairing-App
+        run: |
+          cp platform/linux/install.sh dist/
+          cp platform/linux/controller-256.png dist/
+          cp platform/linux/nso-gc-controller.desktop dist/
+          cd dist && zip NSO-GameCube-Controller-Pairing-App-Linux.zip \
+            NSO-GameCube-Controller-Pairing-App \
+            install.sh \
+            controller-256.png \
+            nso-gc-controller.desktop
 
       - uses: actions/upload-artifact@v4
         with:

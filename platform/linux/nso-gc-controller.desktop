@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=NSO GameCube Controller Pairing App
+Comment=Use Nintendo Switch Online GameCube controllers as Xbox 360 or Dolphin input
+Exec=NSO-GameCube-Controller-Pairing-App
+Icon=nso-gc-controller
+Terminal=false
+Type=Application
+Categories=Game;Utility;
