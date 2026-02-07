@@ -1,5 +1,7 @@
 hidapi>=0.14.0
 pyusb>=1.2.1
+customtkinter>=5.2.0
+Pillow>=9.0.0
 vgamepad @ git+https://github.com/yannbouteiller/vgamepad.git@main ; sys_platform == "win32"
 evdev>=1.7.0; sys_platform == "linux"
 bumble>=0.0.200; sys_platform == "linux"
