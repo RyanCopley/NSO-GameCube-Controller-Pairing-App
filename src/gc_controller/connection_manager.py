@@ -20,16 +20,11 @@ IS_MACOS = sys.platform == "darwin"
 class ConnectionManager:
     """Manages USB initialization and HID connection."""
 
-    # Standard Switch rumble data (4 bytes per motor)
-    _RUMBLE_ON = bytes([0x28, 0x88, 0x60, 0x61])
-    _RUMBLE_OFF = bytes([0x00, 0x01, 0x40, 0x40])
-
     def __init__(self, on_status: Callable[[str], None], on_progress: Callable[[int], None]):
         self._on_status = on_status
         self._on_progress = on_progress
         self.device: Optional[hid.device] = None
         self.device_path: Optional[bytes] = None
-        self._rumble_counter = 0
 
     @staticmethod
     def enumerate_devices() -> List[dict]:
@@ -185,46 +180,9 @@ class ConnectionManager:
         except Exception:
             pass
 
-        # Fallback: try alternative HIDAPI methods (Windows — no pyusb)
-        if self.device:
-            import os, pathlib
-            log = pathlib.Path(os.path.expanduser("~/gc_rumble_debug.txt"))
-            rumble = self._RUMBLE_ON if state else self._RUMBLE_OFF
-            sw2_cmd = bytes([0x0a, 0x91, 0x00, 0x02, 0x00, 0x04,
-                             0x00, 0x00, 0x01 if state else 0x00,
-                             0x00, 0x00, 0x00])
-
-            results = []
-            # Try send_feature_report with SW2 command
-            for report_id in [0x00, 0x05, 0x0a]:
-                try:
-                    pkt = bytes([report_id]) + sw2_cmd
-                    ret = self.device.send_feature_report(pkt)
-                    results.append(f"feature report_id=0x{report_id:02x}: {ret}")
-                    if ret > 0:
-                        with open(log, "a") as f:
-                            f.write("\n".join(results) + "\n")
-                        return True
-                except Exception as e:
-                    results.append(f"feature report_id=0x{report_id:02x}: {type(e).__name__}: {e}")
-
-            # Try write with various report IDs
-            for report_id in [0x05, 0x80]:
-                try:
-                    pkt = bytearray(64)
-                    pkt[0] = report_id
-                    pkt[1:1+len(sw2_cmd)] = sw2_cmd
-                    ret = self.device.write(bytes(pkt))
-                    results.append(f"write report_id=0x{report_id:02x}: {ret}")
-                    if ret > 0:
-                        with open(log, "a") as f:
-                            f.write("\n".join(results) + "\n")
-                        return True
-                except Exception as e:
-                    results.append(f"write report_id=0x{report_id:02x}: {type(e).__name__}: {e}")
-
-            with open(log, "a") as f:
-                f.write("\n".join(results) + "\n---\n")
+        # Windows USB: HID interface 0 is input-only (no output endpoint),
+        # so rumble is unavailable without libusb/WinUSB for interface 1.
+        # Rumble works on Windows via BLE (Bleak backend).
         return False
 
     def disconnect(self):

@@ -22,9 +22,12 @@ A cross-platform Python/Tkinter tool that connects Nintendo Switch Online GameCu
 |---|---|---|---|
 | USB connection | Yes | Yes | Yes |
 | Bluetooth (BLE) | Yes | Yes | Yes |
-| Rumble | Yes | Yes | ? |
+| Rumble (USB) | No* | Yes | ? |
+| Rumble (BLE) | Yes | Yes | ? |
 | Xbox 360 emulation | Yes (ViGEmBus) | Yes (evdev/uinput) | — |
 | Dolphin pipe mode | — | Yes | Yes |
+
+\* **Windows USB rumble**: The controller's command interface is not accessible through the Windows HID driver. Rumble works over Bluetooth, or over USB if you install a [WinUSB driver via Zadig](https://zadig.akeo.ie/) for the controller's vendor-specific interface (interface 1).
 
 ## Bluetooth Chipset Compatibility
 
@@ -50,8 +53,9 @@ pip install -r requirements.txt
 2. Platform-specific setup:
 
 ### Windows
-- Install the [ViGEmBus driver](https://github.com/nefarius/ViGEmBus) for Xbox 360 emulation
+- Install the [ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases) for Xbox 360 emulation — download the latest `ViGEmBus_Setup_x64.msi` from the releases page, run the installer, and reboot
 - **For Bluetooth**: install the [Bleak](https://github.com/hbldh/bleak) BLE library (`pip install bleak`). No elevated privileges needed — Windows BLE runs in userspace via WinRT.
+
 
 ### Linux
 - Install libusb: `sudo apt install libusb-1.0-0-dev` (Ubuntu/Debian) or `sudo dnf install libusb1-devel` (Fedora)
