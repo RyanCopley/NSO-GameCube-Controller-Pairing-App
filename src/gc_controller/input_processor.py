@@ -6,6 +6,7 @@ calibration tracking, emulation updates, and UI update scheduling.
 """
 
 import queue
+import sys
 import time
 import threading
 from typing import Callable, Optional
@@ -13,6 +14,8 @@ from typing import Callable, Optional
 from .controller_constants import BUTTONS, normalize
 from .calibration import CalibrationManager
 from .emulation_manager import EmulationManager
+
+IS_WINDOWS = sys.platform == 'win32'
 
 
 class InputProcessor:
@@ -86,6 +89,11 @@ class InputProcessor:
                         else:
                             break
                     if latest:
+                        # On Windows, HIDAPI prepends the report ID byte
+                        # to hid_read() data; strip it so byte offsets
+                        # match the Linux/macOS layout the parser expects.
+                        if IS_WINDOWS:
+                            latest = latest[1:]
                         self._process_data(latest)
                     else:
                         time.sleep(0.004)
