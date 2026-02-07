@@ -35,7 +35,9 @@ def _translate_report_0x05(data) -> list:
         [7]      NSO buttons 2: DDown=01 DUp=02 DRight=04 DLeft=08 SR=10 SL=20 L=40 ZL=80
         [8-10]   reserved
         [11-16]  sticks (packed 12-bit: LX, LY, RX, RY)
-        [17+]    unknown / no analog triggers in uninitialized mode
+        [17-60]  IMU / unknown
+        [61]     left trigger analog (~0x1e rest, ~0xe9 fully pressed)
+        [62]     right trigger analog (~0x24 rest, ~0xf0 fully pressed)
 
     Target GC USB format (what _process_data expects):
         [3]      B=01 A=02 Y=04 X=08 R=10 Z=20 Start=40
@@ -84,12 +86,10 @@ def _translate_report_0x05(data) -> list:
     for i in range(6):
         buf[6 + i] = data[11 + i]
 
-    # Triggers: no analog data in uninitialized mode,
-    # synthesize from digital L/R trigger clicks.
-    if b2_nso & 0x40:  # L digital click -> left trigger
-        buf[13] = 255
-    if b0_nso & 0x40:  # R digital click -> right trigger
-        buf[14] = 255
+    # Analog triggers: bytes 61-62 in the 0x05 report
+    if len(data) > 62:
+        buf[13] = data[61]  # left trigger analog
+        buf[14] = data[62]  # right trigger analog
 
     return buf
 
@@ -151,8 +151,6 @@ class InputProcessor:
             if not device:
                 return
             device.set_nonblocking(1)
-            _dbg_count = 0
-
             while self.is_reading and not self._stop_event.is_set():
                 if not device:
                     break
@@ -166,14 +164,6 @@ class InputProcessor:
                         else:
                             break
                     if latest:
-                        # DEBUG: dump full report to find analog triggers
-                        if IS_WINDOWS and _dbg_count < 20:
-                            import os, pathlib
-                            log = pathlib.Path(os.path.expanduser("~/gc_debug.txt"))
-                            with open(log, "a") as f:
-                                hexdump = ' '.join(f'{b:02x}' for b in latest)
-                                f.write(f"pkt {_dbg_count}: {hexdump}\n")
-                            _dbg_count += 1
                         if IS_WINDOWS:
                             if latest[0] == 0x05:
                                 # Uninitialized NSO format (no libusb on
