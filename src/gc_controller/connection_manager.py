@@ -146,43 +146,48 @@ class ConnectionManager:
         return self.init_hid_device(device_path=device_path)
 
     def send_rumble(self, state: bool) -> bool:
-        """Send a rumble ON/OFF command via USB endpoint 0x02 on interface 1.
+        """Send a rumble ON/OFF command.
 
-        Uses the SW2 vibration pattern command (0x0A) in the standard
-        command format — the same transport used for init and LED commands.
-
-        Acquires a fresh pyusb device each time and releases it after use
-        to avoid holding WinUSB handles that conflict with HIDAPI on Windows.
+        Tries pyusb first (endpoint 0x02 on interface 1), then falls back
+        to HIDAPI write for Windows where pyusb/libusb is unavailable.
         """
-        try:
-            dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
-            if dev is None:
-                return False
-        except Exception:
-            return False
-        # CMD 0x0A = set vibration pattern, interface 0x00 = USB
         cmd = bytes([0x0a, 0x91, 0x00, 0x02, 0x00, 0x04,
                      0x00, 0x00, 0x01 if state else 0x00,
                      0x00, 0x00, 0x00])
+
+        # Try pyusb (works on Linux/macOS)
         try:
+            dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
+            if dev is not None:
+                try:
+                    try:
+                        usb.util.claim_interface(dev, 1)
+                    except usb.core.USBError:
+                        pass
+                    dev.write(0x02, cmd, 1000)
+                    try:
+                        usb.util.release_interface(dev, 1)
+                    except usb.core.USBError:
+                        pass
+                    return True
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        usb.util.dispose_resources(dev)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Fallback: HIDAPI write (Windows — no pyusb/libusb)
+        if self.device:
             try:
-                usb.util.claim_interface(dev, 1)
-            except usb.core.USBError:
-                pass
-            dev.write(0x02, cmd, 1000)
-            try:
-                usb.util.release_interface(dev, 1)
-            except usb.core.USBError:
-                pass
-            return True
-        except Exception as e:
-            print(f"USB rumble write error: {e}")
-            return False
-        finally:
-            try:
-                usb.util.dispose_resources(dev)
+                self.device.write(b'\x00' + cmd)
+                return True
             except Exception:
                 pass
+        return False
 
     def disconnect(self):
         """Close and release the HID device."""
