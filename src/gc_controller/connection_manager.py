@@ -185,44 +185,46 @@ class ConnectionManager:
         except Exception:
             pass
 
-        # Fallback: standard Switch rumble via HIDAPI (Windows — no pyusb)
+        # Fallback: try alternative HIDAPI methods (Windows — no pyusb)
         if self.device:
             import os, pathlib
             log = pathlib.Path(os.path.expanduser("~/gc_rumble_debug.txt"))
-            try:
-                rumble = self._RUMBLE_ON if state else self._RUMBLE_OFF
+            rumble = self._RUMBLE_ON if state else self._RUMBLE_OFF
+            sw2_cmd = bytes([0x0a, 0x91, 0x00, 0x02, 0x00, 0x04,
+                             0x00, 0x00, 0x01 if state else 0x00,
+                             0x00, 0x00, 0x00])
 
-                # Enable vibration first via subcommand 0x48 (once)
-                if not hasattr(self, '_vibration_enabled'):
-                    enable = bytearray(64)
-                    enable[0] = 0x01  # output report ID
-                    enable[1] = self._rumble_counter & 0x0F
-                    enable[2:6] = self._RUMBLE_OFF  # left neutral
-                    enable[6:10] = self._RUMBLE_OFF  # right neutral
-                    enable[10] = 0x48  # subcommand: enable vibration
-                    enable[11] = 0x01  # enable
-                    self._rumble_counter = (self._rumble_counter + 1) & 0x0F
-                    ret = self.device.write(bytes(enable))
-                    with open(log, "a") as f:
-                        f.write(f"enable_vib write returned: {ret}\n")
-                        f.write(f"  packet: {' '.join(f'{b:02x}' for b in enable)}\n")
-                    self._vibration_enabled = True
+            results = []
+            # Try send_feature_report with SW2 command
+            for report_id in [0x00, 0x05, 0x0a]:
+                try:
+                    pkt = bytes([report_id]) + sw2_cmd
+                    ret = self.device.send_feature_report(pkt)
+                    results.append(f"feature report_id=0x{report_id:02x}: {ret}")
+                    if ret > 0:
+                        with open(log, "a") as f:
+                            f.write("\n".join(results) + "\n")
+                        return True
+                except Exception as e:
+                    results.append(f"feature report_id=0x{report_id:02x}: {type(e).__name__}: {e}")
 
-                # Send rumble via output report 0x10, padded to 64 bytes
-                packet = bytearray(64)
-                packet[0] = 0x10  # output report ID: rumble only
-                packet[1] = self._rumble_counter & 0x0F
-                packet[2:6] = rumble  # left motor
-                packet[6:10] = rumble  # right motor
-                self._rumble_counter = (self._rumble_counter + 1) & 0x0F
-                ret = self.device.write(bytes(packet))
-                with open(log, "a") as f:
-                    f.write(f"rumble({'ON' if state else 'OFF'}) write returned: {ret}\n")
-                    f.write(f"  packet: {' '.join(f'{b:02x}' for b in packet)}\n")
-                return ret > 0
-            except Exception as e:
-                with open(log, "a") as f:
-                    f.write(f"rumble error: {type(e).__name__}: {e}\n")
+            # Try write with various report IDs
+            for report_id in [0x05, 0x80]:
+                try:
+                    pkt = bytearray(64)
+                    pkt[0] = report_id
+                    pkt[1:1+len(sw2_cmd)] = sw2_cmd
+                    ret = self.device.write(bytes(pkt))
+                    results.append(f"write report_id=0x{report_id:02x}: {ret}")
+                    if ret > 0:
+                        with open(log, "a") as f:
+                            f.write("\n".join(results) + "\n")
+                        return True
+                except Exception as e:
+                    results.append(f"write report_id=0x{report_id:02x}: {type(e).__name__}: {e}")
+
+            with open(log, "a") as f:
+                f.write("\n".join(results) + "\n---\n")
         return False
 
     def disconnect(self):
