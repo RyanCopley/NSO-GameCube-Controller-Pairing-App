@@ -79,8 +79,23 @@ class BleakBackend:
         return True
 
     async def open(self):
-        """No-op — the OS BLE stack is always available in userspace."""
-        pass
+        """Warm up the OS BLE stack with a brief scan.
+
+        On macOS, CoreBluetooth doesn't start tracking peripherals until the
+        first scan is issued.  Without this, the first real scan_and_connect
+        misses already-advertising devices and falls through to the full
+        timeout.  A 2-second warm-up scan primes the cache so subsequent
+        scans find devices immediately.
+        """
+        _log("open: running warm-up scan...")
+        try:
+            scanner = BleakScanner()
+            await scanner.start()
+            await asyncio.sleep(2.0)
+            await scanner.stop()
+            _log("open: warm-up scan complete")
+        except Exception as e:
+            _log(f"open: warm-up scan failed (non-fatal): {e}")
 
     async def scan_and_connect(
         self,
