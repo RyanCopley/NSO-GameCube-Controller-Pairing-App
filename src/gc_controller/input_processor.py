@@ -75,6 +75,7 @@ class InputProcessor:
             if not device:
                 return
             device.set_nonblocking(1)
+            _dbg_count = 0
 
             while self.is_reading and not self._stop_event.is_set():
                 if not device:
@@ -89,11 +90,14 @@ class InputProcessor:
                         else:
                             break
                     if latest:
-                        # On Windows, HIDAPI prepends the report ID byte
-                        # to hid_read() data; strip it so byte offsets
-                        # match the Linux/macOS layout the parser expects.
-                        if IS_WINDOWS:
-                            latest = latest[1:]
+                        # Log first 10 raw packets on Windows for debugging
+                        if IS_WINDOWS and _dbg_count < 10:
+                            import os, pathlib
+                            log = pathlib.Path(os.path.expanduser("~/gc_debug.txt"))
+                            with open(log, "a") as f:
+                                hexdump = ' '.join(f'{b:02x}' for b in latest[:20])
+                                f.write(f"pkt {_dbg_count} len={len(latest)}: {hexdump}\n")
+                            _dbg_count += 1
                         self._process_data(latest)
                     else:
                         time.sleep(0.004)

@@ -29,7 +29,18 @@ class ConnectionManager:
     @staticmethod
     def enumerate_devices() -> List[dict]:
         """Return a list of HID device info dicts for all connected GC controllers."""
-        return hid.enumerate(VENDOR_ID, PRODUCT_ID)
+        devices = hid.enumerate(VENDOR_ID, PRODUCT_ID)
+        if sys.platform == 'win32':
+            import os, pathlib
+            log = pathlib.Path(os.path.expanduser("~/gc_debug.txt"))
+            with open(log, "a") as f:
+                f.write(f"--- enumerate: {len(devices)} device(s) ---\n")
+                for i, d in enumerate(devices):
+                    f.write(f"  dev {i}: interface={d.get('interface_number', '?')} "
+                            f"usage_page=0x{d.get('usage_page', 0):04x} "
+                            f"usage=0x{d.get('usage', 0):04x} "
+                            f"path={d['path']}\n")
+        return devices
 
     @staticmethod
     def enumerate_usb_devices() -> list:
