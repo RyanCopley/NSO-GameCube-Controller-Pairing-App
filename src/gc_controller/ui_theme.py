@@ -11,7 +11,7 @@ import sys
 import customtkinter
 
 # ── Main purple palette ──────────────────────────────────────────
-GC_PURPLE_DARK = "#3B1F6E"       # window/app background
+GC_PURPLE_DARK = "#535486"       # window/app background
 GC_PURPLE_MID = "#4B2D8E"        # controller body, primary purple
 GC_PURPLE_LIGHT = "#6B4EAE"      # accents, hover states
 GC_PURPLE_SURFACE = "#5A3D9E"    # card/frame backgrounds

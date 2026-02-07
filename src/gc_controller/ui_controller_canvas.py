@@ -1,36 +1,86 @@
 """
 UI Controller Canvas - GameCube Controller Visual
 
-Draws a GameCube controller on a tk.Canvas with real-time button highlighting,
-moving stick dots, and proportional trigger fills.
+Draws a GameCube controller using pre-rendered PNG layers from the SVG source.
+Button presses are shown by swapping to lightened overlay images.
+Sticks and triggers are drawn as canvas overlays on top of the images.
 """
 
 import math
+import os
+import sys
 import tkinter as tk
 from typing import Optional
+
+from PIL import Image, ImageTk
 
 from . import ui_theme as T
 from .controller_constants import normalize
 
+# ── Asset paths ───────────────────────────────────────────────────────
+_MODULE_DIR = os.path.dirname(__file__)
+if hasattr(sys, '_MEIPASS'):
+    _ASSETS_DIR = os.path.join(sys._MEIPASS, "gc_controller", "assets", "controller")
+else:
+    _ASSETS_DIR = os.path.join(_MODULE_DIR, "assets", "controller")
+
 
 class GCControllerVisual:
-    """Draws and manages a GameCube controller visual on a tk.Canvas."""
+    """Draws and manages a GameCube controller visual using pre-rendered PNG layers."""
 
     CANVAS_W = 520
-    CANVAS_H = 380
+    CANVAS_H = 396              # 372 image + 24px headroom for trigger bars
+    IMG_Y_OFFSET = 24           # shift controller images down to make room
 
-    # Stick gate geometry
-    STICK_GATE_RADIUS = 28
+    # ── Stick geometry (SVG coords scaled to canvas: factor ≈ 0.39) ──
+    LSTICK_CX, LSTICK_CY = 99, 139 + 24
+    CSTICK_CX, CSTICK_CY = 347, 259 + 24
+
+    STICK_GATE_RADIUS = 30      # left stick movement range (SVG r=76 scaled)
+    CSTICK_GATE_RADIUS = 23     # c-stick movement range (SVG r=59.7 scaled)
     STICK_DOT_RADIUS = 5
 
-    # Left stick center on canvas
-    LSTICK_CX, LSTICK_CY = 150, 165
-    # C-stick center on canvas
-    CSTICK_CX, CSTICK_CY = 345, 225
+    # ── Trigger bar geometry (positioned above controller image) ──────
+    TRIGGER_L_X, TRIGGER_L_Y = 45, 2
+    TRIGGER_R_X, TRIGGER_R_Y = 345, 2
+    TRIGGER_W = 130
+    TRIGGER_H = 20
 
-    # Trigger geometry
-    TRIGGER_W = 80
-    TRIGGER_H = 16
+    # ── Button name → SVG layer ID for pressed overlays ───────────────
+    # Layers rendered BELOW the body in the SVG (body occludes parts of them).
+    # These need separate normal + pressed images swapped underneath the body.
+    _UNDER_BODY_MAP = {
+        'R':  'R',
+        'Z':  'Z',
+        'L':  'L',
+        'ZL': 'Zl',
+    }
+    # SVG order for under-body compositing
+    _UNDER_BODY_ORDER = ['R', 'Z', 'L', 'ZL']
+
+    # Layers ON or ABOVE the body in the SVG.
+    # Pressed overlays sit above the body image.
+    _ABOVE_BODY_MAP = {
+        'A':           'A',
+        'B':           'B',
+        'X':           'x',
+        'Y':           'y',
+        'Start/Pause': 'startpause',
+        'Home':        'home',
+        'Capture':     'capture',
+        'Chat':        'char',
+        'Dpad Up':     'dup',
+        'Dpad Down':   'ddown',
+        'Dpad Left':   'dleft',
+        'Dpad Right':  'dright',
+    }
+
+    # All above-body SVG layer IDs in SVG order (for body composite)
+    _BODY_COMPOSITE_LAYERS = [
+        'Base', 'char', 'home', 'capture', 'startpause',
+        'lefttoggle', 'dleft', 'ddown', 'dright', 'dup',
+        'C', 'x', 'y', 'B', 'A',
+    ]
 
     def __init__(self, parent, **kwargs):
         self.canvas = tk.Canvas(
@@ -42,15 +92,139 @@ class GCControllerVisual:
             **kwargs,
         )
 
-        self._draw_controller_body()
-        self._draw_triggers()
-        self._draw_dpad()
-        self._draw_sticks()
-        self._draw_face_buttons()
-        self._draw_center_buttons()
-        self._draw_nso_buttons()
+        # Keep references to PhotoImage objects to prevent GC
+        self._photos = {}
+        self._pressed_photos = {}
+        # Canvas item IDs for pressed overlays (above-body buttons)
+        self._pressed_items = {}
+        # Canvas item IDs for under-body layers: normal + pressed
+        self._under_normal_items = {}
+        self._under_pressed_items = {}
 
-    # ── Drawing primitives ────────────────────────────────────────
+        self._load_images()
+        self._create_canvas_items()
+
+    # ── Image loading ────────────────────────────────────────────────
+
+    def _load_images(self):
+        """Load all layer images from the assets directory."""
+        # Under-body layers: load both normal and pressed
+        for btn_name, layer_id in self._UNDER_BODY_MAP.items():
+            normal_path = os.path.join(_ASSETS_DIR, f"{layer_id}.png")
+            pressed_path = os.path.join(_ASSETS_DIR, f"{layer_id}_pressed.png")
+            self._photos[f'{btn_name}_normal'] = ImageTk.PhotoImage(
+                Image.open(normal_path))
+            self._pressed_photos[btn_name] = ImageTk.PhotoImage(
+                Image.open(pressed_path))
+
+        # Body composite: alpha-composite all on/above-body layers
+        # Use the actual PNG dimensions (not canvas, which includes headroom)
+        first_layer = Image.open(os.path.join(_ASSETS_DIR, "Base.png"))
+        body = Image.new('RGBA', first_layer.size, (0, 0, 0, 0))
+        for layer_id in self._BODY_COMPOSITE_LAYERS:
+            layer_path = os.path.join(_ASSETS_DIR, f"{layer_id}.png")
+            layer_img = Image.open(layer_path).convert('RGBA')
+            body = Image.alpha_composite(body, layer_img)
+        self._photos['body'] = ImageTk.PhotoImage(body)
+
+        # Above-body layers: load pressed versions only
+        for btn_name, layer_id in self._ABOVE_BODY_MAP.items():
+            pressed_path = os.path.join(_ASSETS_DIR, f"{layer_id}_pressed.png")
+            self._pressed_photos[btn_name] = ImageTk.PhotoImage(
+                Image.open(pressed_path))
+
+    # ── Canvas item creation ────────────────────────────────────────
+    # Z-order: under-body (normal+pressed) → body → above-body overlays
+    #          → triggers → sticks
+
+    def _create_canvas_items(self):
+        """Create all canvas items in the correct layer order."""
+        # 1. Under-body layers (L, R, Z, ZL) — normal shown, pressed hidden
+        #    The body image will occlude the parts that should be hidden.
+        oy = self.IMG_Y_OFFSET
+        for btn_name in self._UNDER_BODY_ORDER:
+            normal_item = self.canvas.create_image(
+                0, oy, anchor='nw',
+                image=self._photos[f'{btn_name}_normal'],
+                tags=f'under_{btn_name}_normal',
+            )
+            pressed_item = self.canvas.create_image(
+                0, oy, anchor='nw',
+                image=self._pressed_photos[btn_name],
+                state='hidden',
+                tags=f'under_{btn_name}_pressed',
+            )
+            self._under_normal_items[btn_name] = normal_item
+            self._under_pressed_items[btn_name] = pressed_item
+
+        # 2. Body composite (Base + all on-body elements, occludes shoulders)
+        self.canvas.create_image(
+            0, oy, anchor='nw',
+            image=self._photos['body'],
+            tags='body_img',
+        )
+
+        # 3. Pressed overlays for above-body buttons (hidden initially)
+        for btn_name in self._ABOVE_BODY_MAP:
+            item = self.canvas.create_image(
+                0, oy, anchor='nw',
+                image=self._pressed_photos[btn_name],
+                state='hidden',
+                tags=f'pressed_{btn_name}',
+            )
+            self._pressed_items[btn_name] = item
+
+        # 4. Trigger fill bars (above everything so always visible)
+        self._draw_triggers()
+
+        # 5. Stick octagons and dots (topmost layer)
+        self._draw_sticks()
+
+    def _draw_triggers(self):
+        """Draw L/R trigger fill bars above the shoulder bumpers."""
+        for side, bx, by in [('L', self.TRIGGER_L_X, self.TRIGGER_L_Y),
+                              ('R', self.TRIGGER_R_X, self.TRIGGER_R_Y)]:
+            tw, th = self.TRIGGER_W, self.TRIGGER_H
+
+            # Background bar
+            self._rounded_rect(bx, by, bx + tw, by + th, 4,
+                               fill=T.TRIGGER_BG, outline='#333',
+                               width=1, tags=f'trigger_{side}_bg')
+            # Fill bar (zero width initially)
+            self.canvas.create_rectangle(
+                bx + 2, by + 2, bx + 2, by + th - 2,
+                fill=T.TRIGGER_FILL, outline='',
+                tags=f'trigger_{side}_fill',
+            )
+            # Label
+            self.canvas.create_text(
+                bx + tw / 2, by + th / 2,
+                text=side, fill=T.TEXT_PRIMARY,
+                font=("", 12, "bold"),
+                tags=f'trigger_{side}_text',
+            )
+
+    def _draw_sticks(self):
+        """Draw stick octagon outlines and movable position dots."""
+        dr = self.STICK_DOT_RADIUS
+
+        for tag, cx, cy, gate_r, dot_color in [
+            ('lstick', self.LSTICK_CX, self.LSTICK_CY,
+             self.STICK_GATE_RADIUS, T.STICK_DOT),
+            ('cstick', self.CSTICK_CX, self.CSTICK_CY,
+             self.CSTICK_GATE_RADIUS, T.CSTICK_YELLOW),
+        ]:
+            # Default octagon outline
+            self._draw_octagon_shape(tag, cx, cy, gate_r, None)
+
+            # Stick position dot
+            self.canvas.create_oval(
+                cx - dr, cy - dr, cx + dr, cy + dr,
+                fill=dot_color, outline='',
+                tags=f'{tag}_dot',
+            )
+
+    # ── Drawing primitives ────────────────────────────────────────────
 
     def _rounded_rect(self, x1, y1, x2, y2, r, **kw):
         """Draw a rounded rectangle on the canvas."""
@@ -69,225 +243,6 @@ class GCControllerVisual:
             x1, y1,
         ]
         return self.canvas.create_polygon(points, smooth=True, **kw)
-
-    # ── Controller body ───────────────────────────────────────────
-
-    def _draw_controller_body(self):
-        """Draw the main controller body shape."""
-        # Main body - wide rounded shape
-        body_points = [
-            # Top edge
-            60, 60,
-            120, 40,
-            200, 32,
-            260, 30,
-            320, 32,
-            400, 40,
-            460, 60,
-            # Right side
-            480, 90,
-            485, 130,
-            480, 170,
-            # Right grip
-            485, 200,
-            490, 240,
-            488, 280,
-            478, 310,
-            460, 335,
-            435, 350,
-            405, 350,
-            385, 340,
-            375, 310,
-            370, 270,
-            365, 230,
-            355, 200,
-            340, 180,
-            # Bottom center
-            310, 170,
-            260, 168,
-            210, 170,
-            # Left grip
-            180, 180,
-            165, 200,
-            155, 230,
-            150, 270,
-            145, 310,
-            135, 340,
-            115, 350,
-            85, 350,
-            62, 335,
-            42, 310,
-            32, 280,
-            30, 240,
-            35, 200,
-            40, 170,
-            # Left side
-            35, 130,
-            40, 90,
-        ]
-        self.canvas.create_polygon(
-            body_points, smooth=True,
-            fill=T.GC_PURPLE_MID, outline=T.GC_PURPLE_DARK, width=2,
-            tags='body',
-        )
-
-        # Inner face plate - slightly lighter area
-        inner_points = [
-            100, 75,
-            170, 55,
-            260, 50,
-            350, 55,
-            420, 75,
-            450, 110,
-            455, 160,
-            440, 200,
-            400, 225,
-            350, 245,
-            260, 250,
-            170, 245,
-            120, 225,
-            80, 200,
-            65, 160,
-            70, 110,
-        ]
-        self.canvas.create_polygon(
-            inner_points, smooth=True,
-            fill=T.GC_PURPLE_SURFACE, outline='', width=0,
-            tags='body_inner',
-        )
-
-    # ── Triggers (L / R / Z) ─────────────────────────────────────
-
-    def _draw_triggers(self):
-        """Draw L/R trigger bars and Z button at the top shoulders."""
-        tw, th = self.TRIGGER_W, self.TRIGGER_H
-
-        # Left trigger
-        lx, ly = 100, 48
-        self._rounded_rect(lx, ly, lx + tw, ly + th, 6,
-                           fill=T.BTN_TRIGGER_GRAY, outline=T.GC_PURPLE_DARK,
-                           width=1, tags='trigger_L')
-        # L trigger fill overlay (hidden initially)
-        self.canvas.create_rectangle(
-            lx + 2, ly + 2, lx + 2, ly + th - 2,
-            fill=T.TRIGGER_FILL, outline='', tags='trigger_L_fill',
-        )
-        self.canvas.create_text(lx + tw / 2, ly + th / 2, text="L",
-                                fill=T.TEXT_PRIMARY, font=("", 9, "bold"),
-                                tags='trigger_L_text')
-
-        # Right trigger
-        rx, ry = 340, 48
-        self._rounded_rect(rx, ry, rx + tw, ry + th, 6,
-                           fill=T.BTN_TRIGGER_GRAY, outline=T.GC_PURPLE_DARK,
-                           width=1, tags='trigger_R')
-        self.canvas.create_rectangle(
-            rx + 2, ry + 2, rx + 2, ry + th - 2,
-            fill=T.TRIGGER_FILL, outline='', tags='trigger_R_fill',
-        )
-        self.canvas.create_text(rx + tw / 2, ry + th / 2, text="R",
-                                fill=T.TEXT_PRIMARY, font=("", 9, "bold"),
-                                tags='trigger_R_text')
-
-        # Z button - right shoulder
-        zx, zy = 400, 75
-        self._rounded_rect(zx, zy, zx + 45, zy + 18, 6,
-                           fill=T.BTN_Z_BLUE, outline=T.GC_PURPLE_DARK,
-                           width=1, tags='btn_Z')
-        self.canvas.create_text(zx + 22, zy + 9, text="Z",
-                                fill=T.TEXT_PRIMARY, font=("", 9, "bold"),
-                                tags='btn_Z_text')
-
-    # ── D-pad ─────────────────────────────────────────────────────
-
-    def _draw_dpad(self):
-        """Draw the D-pad cross shape."""
-        cx, cy = 150, 250
-        arm_w, arm_h = 16, 22
-        center_r = 8
-
-        # Center
-        self.canvas.create_oval(
-            cx - center_r, cy - center_r, cx + center_r, cy + center_r,
-            fill=T.BTN_DPAD_GRAY, outline=T.GC_PURPLE_DARK, width=1,
-            tags='dpad_center',
-        )
-
-        # Up
-        self.canvas.create_rectangle(
-            cx - arm_w / 2, cy - center_r - arm_h,
-            cx + arm_w / 2, cy - center_r + 2,
-            fill=T.BTN_DPAD_GRAY, outline=T.GC_PURPLE_DARK, width=1,
-            tags='dpad_up',
-        )
-        # Down
-        self.canvas.create_rectangle(
-            cx - arm_w / 2, cy + center_r - 2,
-            cx + arm_w / 2, cy + center_r + arm_h,
-            fill=T.BTN_DPAD_GRAY, outline=T.GC_PURPLE_DARK, width=1,
-            tags='dpad_down',
-        )
-        # Left
-        self.canvas.create_rectangle(
-            cx - center_r - arm_h, cy - arm_w / 2,
-            cx - center_r + 2, cy + arm_w / 2,
-            fill=T.BTN_DPAD_GRAY, outline=T.GC_PURPLE_DARK, width=1,
-            tags='dpad_left',
-        )
-        # Right
-        self.canvas.create_rectangle(
-            cx + center_r - 2, cy - arm_w / 2,
-            cx + center_r + arm_h, cy + arm_w / 2,
-            fill=T.BTN_DPAD_GRAY, outline=T.GC_PURPLE_DARK, width=1,
-            tags='dpad_right',
-        )
-
-    # ── Analog sticks ─────────────────────────────────────────────
-
-    def _draw_sticks(self):
-        """Draw the left stick and C-stick with gates and movable dots."""
-        r = self.STICK_GATE_RADIUS
-        dr = self.STICK_DOT_RADIUS
-
-        for tag, cx, cy, gate_color, dot_color in [
-            ('lstick', self.LSTICK_CX, self.LSTICK_CY, T.STICK_GATE_BG, T.STICK_DOT),
-            ('cstick', self.CSTICK_CX, self.CSTICK_CY, T.STICK_GATE_BG, T.CSTICK_YELLOW),
-        ]:
-            # Gate background circle
-            self.canvas.create_oval(
-                cx - r - 4, cy - r - 4, cx + r + 4, cy + r + 4,
-                fill=gate_color, outline=T.GC_PURPLE_DARK, width=2,
-                tags=f'{tag}_gate',
-            )
-
-            # Dashed circle outline
-            self.canvas.create_oval(
-                cx - r, cy - r, cx + r, cy + r,
-                outline=T.STICK_CIRCLE, dash=(3, 3),
-                tags=f'{tag}_circle',
-            )
-
-            # Default octagon
-            self._draw_octagon_shape(tag, cx, cy, r, None)
-
-            # Stick dot
-            self.canvas.create_oval(
-                cx - dr, cy - dr, cx + dr, cy + dr,
-                fill=dot_color, outline='',
-                tags=f'{tag}_dot',
-            )
-
-        # Labels
-        self.canvas.create_text(
-            self.LSTICK_CX, self.LSTICK_CY - r - 14,
-            text="Stick", fill=T.TEXT_SECONDARY, font=("", 8),
-            tags='lstick_label',
-        )
-        self.canvas.create_text(
-            self.CSTICK_CX, self.CSTICK_CY - r - 14,
-            text="C-Stick", fill=T.TEXT_SECONDARY, font=("", 8),
-            tags='cstick_label',
-        )
 
     def _draw_octagon_shape(self, stick_tag, cx, cy, radius, octagon_data,
                             color=None, line_tag=None):
@@ -314,173 +269,39 @@ class GCControllerVisual:
             coords, outline=color, fill='', width=2, tags=tag,
         )
 
-    # ── Face buttons (A, B, X, Y) ────────────────────────────────
-
-    def _draw_face_buttons(self):
-        """Draw the A, B, X, Y face buttons."""
-        # A button - large green circle
-        ax, ay = 370, 140
-        ar = 22
-        self.canvas.create_oval(
-            ax - ar, ay - ar, ax + ar, ay + ar,
-            fill=T.BTN_A_GREEN, outline=T.GC_PURPLE_DARK, width=2,
-            tags='btn_A',
-        )
-        self.canvas.create_text(ax, ay, text="A",
-                                fill=T.TEXT_PRIMARY, font=("", 14, "bold"),
-                                tags='btn_A_text')
-
-        # B button - small red circle (below-left of A)
-        bx, by = 335, 172
-        br = 13
-        self.canvas.create_oval(
-            bx - br, by - br, bx + br, by + br,
-            fill=T.BTN_B_RED, outline=T.GC_PURPLE_DARK, width=2,
-            tags='btn_B',
-        )
-        self.canvas.create_text(bx, by, text="B",
-                                fill=T.TEXT_PRIMARY, font=("", 10, "bold"),
-                                tags='btn_B_text')
-
-        # X button - horizontal bean/capsule (right of A)
-        xx, xy = 418, 132
-        self._rounded_rect(xx - 22, xy - 11, xx + 22, xy + 11, 10,
-                           fill=T.BTN_XY_GRAY, outline=T.GC_PURPLE_DARK,
-                           width=2, tags='btn_X')
-        self.canvas.create_text(xx, xy, text="X",
-                                fill=T.GC_PURPLE_DARK, font=("", 10, "bold"),
-                                tags='btn_X_text')
-
-        # Y button - small gray circle (above-left of A)
-        yx, yy = 340, 108
-        yr = 13
-        self.canvas.create_oval(
-            yx - yr, yy - yr, yx + yr, yy + yr,
-            fill=T.BTN_XY_GRAY, outline=T.GC_PURPLE_DARK, width=2,
-            tags='btn_Y',
-        )
-        self.canvas.create_text(yx, yy, text="Y",
-                                fill=T.GC_PURPLE_DARK, font=("", 10, "bold"),
-                                tags='btn_Y_text')
-
-    # ── Center buttons (Start, Home, Capture) ─────────────────────
-
-    def _draw_center_buttons(self):
-        """Draw Start/Pause and other center buttons."""
-        # Start/Pause - small oval in the center
-        sx, sy = 260, 150
-        self.canvas.create_oval(
-            sx - 12, sy - 8, sx + 12, sy + 8,
-            fill=T.BTN_START_GRAY, outline=T.GC_PURPLE_DARK, width=1,
-            tags='btn_Start',
-        )
-        self.canvas.create_text(sx, sy, text="St",
-                                fill=T.GC_PURPLE_DARK, font=("", 7, "bold"),
-                                tags='btn_Start_text')
-
-    # ── NSO-specific buttons ──────────────────────────────────────
-
-    def _draw_nso_buttons(self):
-        """Draw NSO controller-specific buttons (Home, Capture, ZL, GR, GL, Chat)."""
-        # Home button
-        hx, hy = 238, 180
-        self.canvas.create_oval(
-            hx - 8, hy - 8, hx + 8, hy + 8,
-            fill=T.BTN_START_GRAY, outline=T.GC_PURPLE_DARK, width=1,
-            tags='btn_Home',
-        )
-        self.canvas.create_text(hx, hy, text="H",
-                                fill=T.GC_PURPLE_DARK, font=("", 6, "bold"),
-                                tags='btn_Home_text')
-
-        # Capture button
-        cx, cy = 282, 180
-        self.canvas.create_oval(
-            cx - 8, cy - 8, cx + 8, cy + 8,
-            fill=T.BTN_START_GRAY, outline=T.GC_PURPLE_DARK, width=1,
-            tags='btn_Capture',
-        )
-        self.canvas.create_text(cx, cy, text="C",
-                                fill=T.GC_PURPLE_DARK, font=("", 6, "bold"),
-                                tags='btn_Capture_text')
-
-        # ZL button - left shoulder area
-        zlx, zly = 80, 75
-        self._rounded_rect(zlx, zly, zlx + 35, zly + 16, 5,
-                           fill=T.BTN_SHOULDER_GRAY, outline=T.GC_PURPLE_DARK,
-                           width=1, tags='btn_ZL')
-        self.canvas.create_text(zlx + 17, zly + 8, text="ZL",
-                                fill=T.TEXT_PRIMARY, font=("", 7, "bold"),
-                                tags='btn_ZL_text')
-
-        # GR button
-        grx, gry = 450, 98
-        self._rounded_rect(grx, gry, grx + 28, gry + 14, 5,
-                           fill=T.BTN_SHOULDER_GRAY, outline=T.GC_PURPLE_DARK,
-                           width=1, tags='btn_GR')
-        self.canvas.create_text(grx + 14, gry + 7, text="GR",
-                                fill=T.TEXT_PRIMARY, font=("", 6, "bold"),
-                                tags='btn_GR_text')
-
-        # GL button
-        glx, gly = 55, 98
-        self._rounded_rect(glx, gly, glx + 28, gly + 14, 5,
-                           fill=T.BTN_SHOULDER_GRAY, outline=T.GC_PURPLE_DARK,
-                           width=1, tags='btn_GL')
-        self.canvas.create_text(glx + 14, gly + 7, text="GL",
-                                fill=T.TEXT_PRIMARY, font=("", 6, "bold"),
-                                tags='btn_GL_text')
-
-        # Chat button
-        chx, chy = 260, 200
-        self.canvas.create_oval(
-            chx - 7, chy - 7, chx + 7, chy + 7,
-            fill=T.BTN_START_GRAY, outline=T.GC_PURPLE_DARK, width=1,
-            tags='btn_Chat',
-        )
-        self.canvas.create_text(chx, chy, text="Ch",
-                                fill=T.GC_PURPLE_DARK, font=("", 5),
-                                tags='btn_Chat_text')
-
-    # ── Public API ────────────────────────────────────────────────
-
-    # Button name → (canvas tag, default fill, pressed fill)
-    _BUTTON_MAP = {
-        'A':           ('btn_A',       T.BTN_A_GREEN,       T.BTN_A_PRESSED),
-        'B':           ('btn_B',       T.BTN_B_RED,         T.BTN_B_PRESSED),
-        'X':           ('btn_X',       T.BTN_XY_GRAY,       T.BTN_XY_PRESSED),
-        'Y':           ('btn_Y',       T.BTN_XY_GRAY,       T.BTN_XY_PRESSED),
-        'Z':           ('btn_Z',       T.BTN_Z_BLUE,        T.BTN_Z_PRESSED),
-        'L':           ('trigger_L',   T.BTN_TRIGGER_GRAY,  T.BTN_TRIGGER_PRESSED),
-        'R':           ('trigger_R',   T.BTN_TRIGGER_GRAY,  T.BTN_TRIGGER_PRESSED),
-        'ZL':          ('btn_ZL',      T.BTN_SHOULDER_GRAY, T.BTN_SHOULDER_PRESSED),
-        'Start/Pause': ('btn_Start',   T.BTN_START_GRAY,    T.BTN_START_PRESSED),
-        'Home':        ('btn_Home',    T.BTN_START_GRAY,    T.BTN_START_PRESSED),
-        'Capture':     ('btn_Capture', T.BTN_START_GRAY,    T.BTN_START_PRESSED),
-        'GR':          ('btn_GR',      T.BTN_SHOULDER_GRAY, T.BTN_SHOULDER_PRESSED),
-        'GL':          ('btn_GL',      T.BTN_SHOULDER_GRAY, T.BTN_SHOULDER_PRESSED),
-        'Chat':        ('btn_Chat',    T.BTN_START_GRAY,    T.BTN_START_PRESSED),
-        'Dpad Up':     ('dpad_up',     T.BTN_DPAD_GRAY,     T.BTN_DPAD_PRESSED),
-        'Dpad Down':   ('dpad_down',   T.BTN_DPAD_GRAY,     T.BTN_DPAD_PRESSED),
-        'Dpad Left':   ('dpad_left',   T.BTN_DPAD_GRAY,     T.BTN_DPAD_PRESSED),
-        'Dpad Right':  ('dpad_right',  T.BTN_DPAD_GRAY,     T.BTN_DPAD_PRESSED),
-    }
+    # ── Public API ────────────────────────────────────────────────────
 
     def update_button_states(self, button_states: dict):
-        """Highlight pressed buttons via itemconfig fill.
+        """Show/hide pressed button overlays.
 
         Args:
             button_states: dict mapping button name → bool (pressed).
         """
-        # Reset all buttons to default first
-        for name, (tag, default, pressed) in self._BUTTON_MAP.items():
-            self.canvas.itemconfig(tag, fill=default)
+        # Reset under-body layers: show normal, hide pressed
+        for btn_name in self._under_normal_items:
+            self.canvas.itemconfigure(
+                self._under_normal_items[btn_name], state='normal')
+            self.canvas.itemconfigure(
+                self._under_pressed_items[btn_name], state='hidden')
 
-        # Highlight pressed buttons
+        # Reset above-body overlays
+        for btn_name, item_id in self._pressed_items.items():
+            self.canvas.itemconfigure(item_id, state='hidden')
+
+        # Apply pressed states
         for name, is_pressed in button_states.items():
-            if is_pressed and name in self._BUTTON_MAP:
-                tag, default, pressed = self._BUTTON_MAP[name]
-                self.canvas.itemconfig(tag, fill=pressed)
+            if not is_pressed:
+                continue
+            # Under-body buttons: swap normal→hidden, pressed→visible
+            if name in self._under_normal_items:
+                self.canvas.itemconfigure(
+                    self._under_normal_items[name], state='hidden')
+                self.canvas.itemconfigure(
+                    self._under_pressed_items[name], state='normal')
+            # Above-body buttons: show pressed overlay
+            elif name in self._pressed_items:
+                self.canvas.itemconfigure(
+                    self._pressed_items[name], state='normal')
 
     def update_stick_position(self, side: str, x_norm: float, y_norm: float):
         """Move a stick dot to the given normalized position.
@@ -495,12 +316,13 @@ class GCControllerVisual:
 
         if side == 'left':
             cx, cy = self.LSTICK_CX, self.LSTICK_CY
+            r = self.STICK_GATE_RADIUS
             dot_tag = 'lstick_dot'
         else:
             cx, cy = self.CSTICK_CX, self.CSTICK_CY
+            r = self.CSTICK_GATE_RADIUS
             dot_tag = 'cstick_dot'
 
-        r = self.STICK_GATE_RADIUS
         dr = self.STICK_DOT_RADIUS
         x_pos = cx + x_norm * r
         y_pos = cy - y_norm * r
@@ -510,31 +332,52 @@ class GCControllerVisual:
                            x_pos + dr, y_pos + dr)
 
     def update_trigger_fill(self, side: str, value_0_255: int):
-        """Fill trigger shape proportionally.
+        """Fill trigger bar proportionally.
 
         Args:
             side: 'left' or 'right'.
             value_0_255: raw trigger value 0–255.
         """
         tw = self.TRIGGER_W
-        th = self.TRIGGER_H
 
         if side == 'left':
             tag = 'trigger_L_fill'
-            bx = 100
-            by = 48
+            bx, by = self.TRIGGER_L_X, self.TRIGGER_L_Y
         else:
             tag = 'trigger_R_fill'
-            bx = 340
-            by = 48
+            bx, by = self.TRIGGER_R_X, self.TRIGGER_R_Y
 
+        th = self.TRIGGER_H
         fill_w = (value_0_255 / 255.0) * (tw - 4)
         self.canvas.coords(tag,
                            bx + 2, by + 2,
                            bx + 2 + fill_w, by + th - 2)
 
+    def draw_trigger_bump_line(self, side: str, bump_raw: float):
+        """Draw a vertical marker line on the trigger bar at the bump threshold.
+
+        Args:
+            side: 'left' or 'right'.
+            bump_raw: raw bump value (0–255).
+        """
+        tw = self.TRIGGER_W
+        if side == 'left':
+            tag = 'trigger_L_bump'
+            bx, by = self.TRIGGER_L_X, self.TRIGGER_L_Y
+        else:
+            tag = 'trigger_R_bump'
+            bx, by = self.TRIGGER_R_X, self.TRIGGER_R_Y
+
+        self.canvas.delete(tag)
+        th = self.TRIGGER_H
+        x = bx + 2 + (bump_raw / 255.0) * (tw - 4)
+        self.canvas.create_line(
+            x, by + 1, x, by + th - 1,
+            fill=T.TRIGGER_BUMP_LINE, width=2, tags=tag,
+        )
+
     def draw_octagon(self, side: str, octagon_data, color: Optional[str] = None):
-        """Draw a calibration octagon in the stick gate.
+        """Draw a calibration octagon in the stick area.
 
         Args:
             side: 'left' or 'right'.
@@ -544,14 +387,13 @@ class GCControllerVisual:
         if side == 'left':
             tag = 'lstick'
             cx, cy = self.LSTICK_CX, self.LSTICK_CY
+            r = self.STICK_GATE_RADIUS
         else:
             tag = 'cstick'
             cx, cy = self.CSTICK_CX, self.CSTICK_CY
+            r = self.CSTICK_GATE_RADIUS
 
-        r = self.STICK_GATE_RADIUS
         self._draw_octagon_shape(tag, cx, cy, r, octagon_data, color=color)
-
-        # Raise the dot above the octagon
         self.canvas.tag_raise(f'{tag}_dot')
 
     def draw_octagon_live(self, side: str, dists, points, cx_raw, rx, cy_raw, ry):
@@ -566,11 +408,12 @@ class GCControllerVisual:
         if side == 'left':
             tag = 'lstick'
             canvas_cx, canvas_cy = self.LSTICK_CX, self.LSTICK_CY
+            r = self.STICK_GATE_RADIUS
         else:
             tag = 'cstick'
             canvas_cx, canvas_cy = self.CSTICK_CX, self.CSTICK_CY
+            r = self.CSTICK_GATE_RADIUS
 
-        r = self.STICK_GATE_RADIUS
         live_tag = f'{tag}_octagon'
         self.canvas.delete(live_tag)
 
@@ -595,9 +438,16 @@ class GCControllerVisual:
 
     def reset(self):
         """Reset all elements to default (unpressed, centered sticks, empty triggers)."""
-        # Reset buttons
-        for name, (tag, default, pressed) in self._BUTTON_MAP.items():
-            self.canvas.itemconfig(tag, fill=default)
+        # Reset under-body layers to normal
+        for btn_name in self._under_normal_items:
+            self.canvas.itemconfigure(
+                self._under_normal_items[btn_name], state='normal')
+            self.canvas.itemconfigure(
+                self._under_pressed_items[btn_name], state='hidden')
+
+        # Hide above-body pressed overlays
+        for btn_name, item_id in self._pressed_items.items():
+            self.canvas.itemconfigure(item_id, state='hidden')
 
         # Center sticks
         for side in ('left', 'right'):

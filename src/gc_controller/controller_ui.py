@@ -114,7 +114,7 @@ class ControllerUI:
             outer_frame,
             fg_color=T.GC_PURPLE_DARK,
             segmented_button_fg_color=T.GC_PURPLE_DARK,
-            segmented_button_selected_color=T.GC_PURPLE_LIGHT,
+            segmented_button_selected_color="#463F6F",
             segmented_button_unselected_color=T.GC_PURPLE_DARK,
             segmented_button_selected_hover_color=T.GC_PURPLE_LIGHT,
             segmented_button_unselected_hover_color=T.GC_PURPLE_MID,
@@ -129,8 +129,8 @@ class ControllerUI:
 
         # Save + gear buttons overlaid in the top-right of the tabview
         icon_base = dict(
-            fg_color=T.GC_PURPLE_SURFACE,
-            hover_color=T.GC_PURPLE_LIGHT,
+            fg_color="#463F6F",
+            hover_color="#5A5190",
             text_color=T.TEXT_PRIMARY,
             corner_radius=8,
         )
@@ -186,7 +186,7 @@ class ControllerUI:
 
         slot_ui.status_label = customtkinter.CTkLabel(
             visual_frame, text="Ready to connect",
-            text_color=T.TEXT_SECONDARY, font=(T.FONT_FAMILY, 14),
+            text_color="#FFFFFF", font=(T.FONT_FAMILY, 14),
             anchor="center",
         )
         slot_ui.status_label.pack(fill=tk.X, padx=10, pady=(2, 8))
@@ -196,6 +196,11 @@ class ControllerUI:
             cal_key = f'stick_{side}_octagon'
             octagon_data = cal.get(cal_key)
             slot_ui.controller_visual.draw_octagon(side, octagon_data)
+
+        # Draw trigger bump markers
+        for side in ('left', 'right'):
+            bump_val = cal.get(f'trigger_{side}_bump', 190.0)
+            slot_ui.controller_visual.draw_trigger_bump_line(side, bump_val)
 
         # ── Bottom button row ──
         btn_frame = customtkinter.CTkFrame(tab, fg_color="transparent")
@@ -292,10 +297,12 @@ class ControllerUI:
         s.controller_visual.update_button_states(button_states)
 
     def draw_trigger_markers(self, slot_index: int):
-        """Public wrapper for redrawing trigger markers (no-op, triggers are on canvas)."""
-        # Trigger calibration markers are not drawn on the canvas visual;
-        # the visual shows proportional fills instead.
-        pass
+        """Redraw trigger bump marker lines from calibration data."""
+        s = self.slots[slot_index]
+        cal = self._slot_calibrations[slot_index]
+        for side in ('left', 'right'):
+            bump_val = cal.get(f'trigger_{side}_bump', 190.0)
+            s.controller_visual.draw_trigger_bump_line(side, bump_val)
 
     # ── Octagon drawing ───────────────────────────────────────────
 
