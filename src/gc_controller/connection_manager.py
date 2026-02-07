@@ -186,17 +186,43 @@ class ConnectionManager:
             pass
 
         # Fallback: standard Switch rumble via HIDAPI (Windows — no pyusb)
-        # The controller is in uninitialized mode (0x05 reports) which is
-        # standard Switch format, so it accepts output report 0x10 (rumble).
         if self.device:
+            import os, pathlib
+            log = pathlib.Path(os.path.expanduser("~/gc_rumble_debug.txt"))
             try:
                 rumble = self._RUMBLE_ON if state else self._RUMBLE_OFF
-                packet = bytes([0x10, self._rumble_counter & 0x0F]) + rumble + rumble
+
+                # Enable vibration first via subcommand 0x48 (once)
+                if not hasattr(self, '_vibration_enabled'):
+                    enable = bytearray(64)
+                    enable[0] = 0x01  # output report ID
+                    enable[1] = self._rumble_counter & 0x0F
+                    enable[2:6] = self._RUMBLE_OFF  # left neutral
+                    enable[6:10] = self._RUMBLE_OFF  # right neutral
+                    enable[10] = 0x48  # subcommand: enable vibration
+                    enable[11] = 0x01  # enable
+                    self._rumble_counter = (self._rumble_counter + 1) & 0x0F
+                    ret = self.device.write(bytes(enable))
+                    with open(log, "a") as f:
+                        f.write(f"enable_vib write returned: {ret}\n")
+                        f.write(f"  packet: {' '.join(f'{b:02x}' for b in enable)}\n")
+                    self._vibration_enabled = True
+
+                # Send rumble via output report 0x10, padded to 64 bytes
+                packet = bytearray(64)
+                packet[0] = 0x10  # output report ID: rumble only
+                packet[1] = self._rumble_counter & 0x0F
+                packet[2:6] = rumble  # left motor
+                packet[6:10] = rumble  # right motor
                 self._rumble_counter = (self._rumble_counter + 1) & 0x0F
-                self.device.write(packet)
-                return True
-            except Exception:
-                pass
+                ret = self.device.write(bytes(packet))
+                with open(log, "a") as f:
+                    f.write(f"rumble({'ON' if state else 'OFF'}) write returned: {ret}\n")
+                    f.write(f"  packet: {' '.join(f'{b:02x}' for b in packet)}\n")
+                return ret > 0
+            except Exception as e:
+                with open(log, "a") as f:
+                    f.write(f"rumble error: {type(e).__name__}: {e}\n")
         return False
 
     def disconnect(self):
