@@ -33,12 +33,12 @@ A cross-platform Python/Tkinter tool that connects the [Nintendo Switch Online G
 
 ## Bluetooth Chipset Compatibility
 
-| Chipset | Status |
-|---|---|
-| Qualcomm | Working |
-| Realtek | Working |
-| Intel | Unknown |
-| Broadcom | Unknown |
+| Chipset | Tested Adapter | Status |
+|---|---|---|
+| Qualcomm | TP-Link UB500 (USB ID `2357:0604`) | Working |
+| Realtek RTL8761B | MSI onboard (Foxconn, USB ID `0489:e10a`) | Not working |
+| Intel | Unknown | Partial (pairing works, reconnection is glitchy) |
+| Broadcom | — | Unknown |
 
 ## Requirements
 
