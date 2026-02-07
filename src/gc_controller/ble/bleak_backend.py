@@ -61,6 +61,15 @@ def _normalize_address(addr: str | None) -> str | None:
     return re.sub(r'/[PR]$', '', addr)
 
 
+# MAC address pattern: XX:XX:XX:XX:XX:XX
+_MAC_RE = re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
+
+
+def _is_mac_address(addr: str) -> bool:
+    """Return True if addr looks like a MAC address (not a CoreBluetooth UUID)."""
+    return bool(_MAC_RE.match(addr))
+
+
 class BleakBackend:
     """Manages BLE connections via Bleak (macOS/Windows).
 
@@ -90,7 +99,7 @@ class BleakBackend:
         on_disconnect: Callable[[], None],
         target_address: Optional[str] = None,
         exclude_addresses: Optional[list[str]] = None,
-        scan_timeout: float = 15.0,
+        scan_timeout: float = 5.0,
         connect_timeout: float = 15.0,
     ) -> Optional[str]:
         """Scan for an NSO GC controller, connect, and init.
@@ -103,6 +112,13 @@ class BleakBackend:
         """
         target_address = _normalize_address(target_address)
         exclude = set(_normalize_address(a) or a for a in (exclude_addresses or []))
+
+        # On macOS, CoreBluetooth uses UUIDs, not MAC addresses.  A saved
+        # MAC from Linux will never match — discard it so we don't waste
+        # time waiting for a match that can never happen.
+        if target_address and sys.platform == 'darwin' and _is_mac_address(target_address):
+            _log(f"Discarding Linux MAC {target_address} (useless on macOS)")
+            target_address = None
 
         on_status("Scanning for controller...")
         _log(f"Scanning for {scan_timeout}s (target={target_address})...")

@@ -505,8 +505,16 @@ class GCControllerEnabler:
             except Exception:
                 break
 
+        import re
         target_addr = normalize_ble_address(
             slot.ble_address if slot.ble_address else None)
+
+        # On macOS, CoreBluetooth uses UUIDs — a saved MAC from Linux
+        # will never match, so treat it as no saved address (show picker).
+        _mac_re = re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
+        if (target_addr and sys.platform == 'darwin'
+                and _mac_re.match(target_addr)):
+            target_addr = None
 
         if target_addr:
             # Saved address: scan-first with early stop (fast reconnect)
