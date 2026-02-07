@@ -7,6 +7,7 @@ auto-connect, start/stop emulation, and test rumble.
 
 import sys
 import tkinter as tk
+import webbrowser
 from typing import Callable, Optional
 
 import customtkinter
@@ -33,7 +34,9 @@ class SettingsDialog:
                  auto_connect_var: tk.BooleanVar,
                  on_emulate_all: Callable,
                  on_test_rumble_all: Callable,
-                 is_any_emulating: Callable[[], bool]):
+                 is_any_emulating: Callable[[], bool],
+                 is_any_connected: Callable[[], bool] = lambda: False,
+                 on_save: Optional[Callable] = None):
         self._parent = parent
         self._emu_mode_var = emu_mode_var
         self._trigger_mode_var = trigger_mode_var
@@ -41,6 +44,8 @@ class SettingsDialog:
         self._on_emulate_all = on_emulate_all
         self._on_test_rumble_all = on_test_rumble_all
         self._is_any_emulating = is_any_emulating
+        self._is_any_connected = is_any_connected
+        self._on_save = on_save
 
         self._dlg = customtkinter.CTkToplevel(parent)
         self._dlg.title("Settings")
@@ -48,14 +53,21 @@ class SettingsDialog:
         self._dlg.transient(parent)
         self._dlg.configure(fg_color=T.GC_PURPLE_DARK)
 
-        frame = customtkinter.CTkFrame(self._dlg, fg_color=T.GC_PURPLE_DARK)
-        frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        outer = customtkinter.CTkFrame(self._dlg, fg_color=T.GC_PURPLE_DARK)
+        outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # ── Emulation Mode ──
-        customtkinter.CTkLabel(
-            frame, text="Emulation Mode",
-            text_color=T.TEXT_PRIMARY, font=(T.FONT_FAMILY, 16, "bold"),
-        ).pack(anchor=tk.W, pady=(0, 4))
+        # ── Two-column layout ──
+        columns = customtkinter.CTkFrame(outer, fg_color="transparent")
+        columns.pack(fill=tk.BOTH, expand=True)
+
+        left = customtkinter.CTkFrame(columns, fg_color="transparent")
+        left.pack(side=tk.LEFT, fill=tk.BOTH, anchor=tk.N, padx=(0, 16))
+
+        vsep = customtkinter.CTkFrame(columns, fg_color="#463F6F", width=2)
+        vsep.pack(side=tk.LEFT, fill=tk.Y, pady=4)
+
+        right = customtkinter.CTkFrame(columns, fg_color="transparent")
+        right.pack(side=tk.LEFT, fill=tk.BOTH, anchor=tk.N, padx=(16, 0))
 
         radio_kwargs = dict(
             fg_color=T.RADIO_FG,
@@ -69,40 +81,50 @@ class SettingsDialog:
             font=(T.FONT_FAMILY, 14),
         )
 
+        # ════════════════════════════════════════
+        # LEFT COLUMN — Settings
+        # ════════════════════════════════════════
+
+        # ── Emulation Mode ──
+        customtkinter.CTkLabel(
+            left, text="Emulation Mode",
+            text_color=T.TEXT_PRIMARY, font=(T.FONT_FAMILY, 16, "bold"),
+        ).pack(anchor=tk.W, pady=(0, 4))
+
         xbox_state = 'disabled' if IS_MACOS else 'normal'
         customtkinter.CTkRadioButton(
-            frame, text="Xbox 360",
+            left, text="Xbox 360",
             variable=self._emu_mode_var, value='xbox360',
             state=xbox_state, **radio_kwargs,
         ).pack(anchor=tk.W, padx=16, pady=1)
 
         customtkinter.CTkRadioButton(
-            frame, text="Dolphin Pipe",
+            left, text="Dolphin Pipe",
             variable=self._emu_mode_var, value='dolphin_pipe',
             **radio_kwargs,
         ).pack(anchor=tk.W, padx=16, pady=1)
 
         # ── Trigger Mode ──
         customtkinter.CTkLabel(
-            frame, text="Trigger Mode",
+            left, text="Trigger Mode",
             text_color=T.TEXT_PRIMARY, font=(T.FONT_FAMILY, 16, "bold"),
         ).pack(anchor=tk.W, pady=(12, 4))
 
         customtkinter.CTkRadioButton(
-            frame, text="100% at bump",
+            left, text="100% at bump",
             variable=self._trigger_mode_var, value=True,
             **radio_kwargs,
         ).pack(anchor=tk.W, padx=16, pady=1)
 
         customtkinter.CTkRadioButton(
-            frame, text="100% at press",
+            left, text="100% at press",
             variable=self._trigger_mode_var, value=False,
             **radio_kwargs,
         ).pack(anchor=tk.W, padx=16, pady=1)
 
         # ── Auto-connect ──
         customtkinter.CTkCheckBox(
-            frame, text="Auto-connect at startup",
+            left, text="Auto-connect USB at startup",
             variable=self._auto_connect_var,
             fg_color=T.RADIO_FG,
             hover_color=T.RADIO_HOVER,
@@ -112,9 +134,20 @@ class SettingsDialog:
             font=(T.FONT_FAMILY, 14),
         ).pack(anchor=tk.W, pady=(12, 4))
 
-        # ── Separator ──
-        sep = customtkinter.CTkFrame(frame, fg_color=T.GC_PURPLE_MID, height=2)
-        sep.pack(fill=tk.X, pady=(12, 12))
+        # ── Save button ──
+        customtkinter.CTkButton(
+            left, text="Save",
+            command=self._on_save_click,
+            fg_color="#463F6F",
+            hover_color="#5A5190",
+            text_color=T.TEXT_PRIMARY,
+            corner_radius=12, height=36, width=220,
+            font=(T.FONT_FAMILY, 14),
+        ).pack(anchor=tk.W, pady=(12, 0))
+
+        # ════════════════════════════════════════
+        # RIGHT COLUMN — Actions & About
+        # ════════════════════════════════════════
 
         btn_kwargs = dict(
             fg_color=T.BTN_FG,
@@ -126,32 +159,62 @@ class SettingsDialog:
         )
 
         # ── Start/Stop Emulation ──
+        any_connected = self._is_any_connected()
         emu_text = "Stop Emulation" if self._is_any_emulating() else "Start Emulation"
         self._emulate_btn = customtkinter.CTkButton(
-            frame, text=emu_text,
+            right, text=emu_text,
             command=self._on_emulate_click,
+            state="normal" if any_connected else "disabled",
             **btn_kwargs,
         )
-        self._emulate_btn.pack(anchor=tk.W, pady=4)
+        self._emulate_btn.pack(anchor=tk.W, pady=(0, 4))
 
         # ── Test Rumble ──
         self._rumble_btn = customtkinter.CTkButton(
-            frame, text="Test Rumble",
+            right, text="Test Rumble",
             command=self._on_test_rumble_all,
+            state="normal" if any_connected else "disabled",
             **btn_kwargs,
         )
         self._rumble_btn.pack(anchor=tk.W, pady=4)
 
-        # ── Close button ──
-        customtkinter.CTkButton(
-            frame, text="Close",
-            command=self._dlg.destroy,
-            fg_color=T.GC_PURPLE_SURFACE,
-            hover_color=T.GC_PURPLE_LIGHT,
-            text_color=T.TEXT_PRIMARY,
-            corner_radius=12, height=36, width=220,
-            font=(T.FONT_FAMILY, 14),
-        ).pack(anchor=tk.W, pady=(12, 0))
+        # ── About / Credits ──
+        sep2 = customtkinter.CTkFrame(right, fg_color="#463F6F", height=2)
+        sep2.pack(fill=tk.X, pady=(12, 8))
+
+        customtkinter.CTkLabel(
+            right, text="About",
+            text_color=T.TEXT_PRIMARY, font=(T.FONT_FAMILY, 16, "bold"),
+        ).pack(anchor=tk.W, pady=(0, 4))
+
+        src_link = customtkinter.CTkLabel(
+            right, text="Source Code on GitHub",
+            text_color=T.TEXT_SECONDARY, font=(T.FONT_FAMILY, 13, "underline"),
+            cursor="hand2",
+        )
+        src_link.pack(anchor=tk.W, padx=4)
+        src_link.bind("<Button-1>", lambda e: webbrowser.open(
+            "https://github.com/RyanCopley/NSO-GameCube-Controller-Pairing-App"))
+
+        customtkinter.CTkLabel(
+            right, text="Credits & Special Thanks",
+            text_color=T.TEXT_PRIMARY, font=(T.FONT_FAMILY, 14, "bold"),
+        ).pack(anchor=tk.W, pady=(8, 2))
+
+        credits = [
+            ("GVNPWRS/NSO-GC-Controller-PC", "https://github.com/GVNPWRS/NSO-GC-Controller-PC"),
+            ("Nohzockt/Switch2-Controllers", "https://github.com/Nohzockt/Switch2-Controllers"),
+            ("isaacs-12/nso-gc-bridge", "https://github.com/isaacs-12/nso-gc-bridge"),
+            ("darthcloud/BlueRetro", "https://github.com/darthcloud/BlueRetro"),
+        ]
+        for label_text, url in credits:
+            lbl = customtkinter.CTkLabel(
+                right, text=label_text,
+                text_color=T.TEXT_SECONDARY, font=(T.FONT_FAMILY, 12, "underline"),
+                cursor="hand2",
+            )
+            lbl.pack(anchor=tk.W, padx=12)
+            lbl.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
 
         self._dlg.protocol("WM_DELETE_WINDOW", self._dlg.destroy)
 
@@ -169,6 +232,11 @@ class SettingsDialog:
 
         # grab_set after window is visible to avoid TclError
         self._dlg.after(10, self._dlg.grab_set)
+
+    def _on_save_click(self):
+        if self._on_save:
+            self._on_save()
+        self._dlg.destroy()
 
     def _on_emulate_click(self):
         self._on_emulate_all()

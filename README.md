@@ -204,12 +204,12 @@ platform/
   ```
   Then log out and back in.
 
-## Credits, Special Thanks
+## Credits & Special Thanks
 
-This project originaly based on https://github.com/GVNPWRS/NSO-GC-Controller-PC, which may or may not have been a fork of an existing version of that.
-https://github.com/Nohzockt/Switch2-Controllers Was used as a reference in some cases
-https://github.com/isaacs-12/nso-gc-bridge contained macos bluetooth support that was used as a reference
-BlueRetro adapter source code was a reference for bluetooth support
+- [GVNPWRS/NSO-GC-Controller-PC](https://github.com/GVNPWRS/NSO-GC-Controller-PC) — original project this was based on
+- [Nohzockt/Switch2-Controllers](https://github.com/Nohzockt/Switch2-Controllers) — Switch controller protocol reference
+- [isaacs-12/nso-gc-bridge](https://github.com/isaacs-12/nso-gc-bridge) — macOS Bluetooth support reference
+- [darthcloud/BlueRetro](https://github.com/darthcloud/BlueRetro) — Bluetooth protocol reference
 
 ## License
 

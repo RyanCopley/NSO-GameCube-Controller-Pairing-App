@@ -78,6 +78,7 @@ class ControllerUI:
         # Callbacks for settings dialog
         self._on_emulate_all = on_emulate_all
         self._on_test_rumble_all = on_test_rumble_all
+        self._on_save = on_save
 
         # Dirty (unsaved changes) tracking per slot
         self._slot_dirty: List[bool] = [False] * MAX_SLOTS
@@ -268,6 +269,8 @@ class ControllerUI:
             on_emulate_all=self._on_emulate_all if self._on_emulate_all else lambda: None,
             on_test_rumble_all=self._on_test_rumble_all if self._on_test_rumble_all else lambda: None,
             is_any_emulating=lambda: any(self._slot_emulating),
+            is_any_connected=lambda: any(self._slot_connected),
+            on_save=self._on_save,
         )
 
     # ── UI update methods ────────────────────────────────────────────
