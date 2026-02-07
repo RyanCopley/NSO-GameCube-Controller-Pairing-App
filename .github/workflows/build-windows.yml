@@ -24,7 +24,10 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller gc_controller_enabler.spec
 
+      - name: Zip artifact
+        run: Compress-Archive -Path dist/NSO-GameCube-Controller-Pairing-App.exe -DestinationPath dist/NSO-GameCube-Controller-Pairing-App-Windows.zip
+
       - uses: actions/upload-artifact@v4
         with:
           name: NSO-GameCube-Controller-Pairing-App-Windows
-          path: dist/NSO-GameCube-Controller-Pairing-App.exe
+          path: dist/NSO-GameCube-Controller-Pairing-App-Windows.zip

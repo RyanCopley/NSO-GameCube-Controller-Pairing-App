@@ -1,5 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
+import os
+
+if sys.platform == "win32":
+    icon_file = 'controller.ico'
+elif sys.platform == "darwin":
+    icon_file = 'controller.icns'
+else:
+    icon_file = None
 
 a = Analysis(
     ['src/gc_controller/__main__.py'],
@@ -35,4 +44,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=icon_file if icon_file and os.path.exists(icon_file) else None,
 )
