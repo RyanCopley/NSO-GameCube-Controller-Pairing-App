@@ -74,7 +74,8 @@ STICK_CIRCLE = "#999999"
 
 # ── Font ────────────────────────────────────────────────────────
 FONT_FAMILY = "Varela Round"
-_FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+_BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
+_FONT_DIR = os.path.join(_BASE_DIR, "gc_controller", "fonts") if hasattr(sys, '_MEIPASS') else os.path.join(_BASE_DIR, "fonts")
 _FONT_FILE = os.path.join(_FONT_DIR, "VarelaRound-Regular.ttf")
 
 

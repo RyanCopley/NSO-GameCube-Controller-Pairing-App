@@ -26,6 +26,11 @@ if os.path.exists(os.path.join('images', 'stick_left.png')):
 if os.path.exists(os.path.join('images', 'stick_right.png')):
     datas.append((os.path.join('images', 'stick_right.png'), '.'))
 
+# Bundled font
+_font_path = os.path.join('src', 'gc_controller', 'fonts', 'VarelaRound-Regular.ttf')
+if os.path.exists(_font_path):
+    datas.append((_font_path, os.path.join('gc_controller', 'fonts')))
+
 # Add vgamepad DLLs for Windows as binaries (not datas) so PyInstaller
 # resolves their transitive dependencies (MSVC runtime, etc.)
 # NOTE: We must NOT 'import vgamepad' here because that triggers CDLL()
