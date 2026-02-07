@@ -32,6 +32,12 @@ if os.path.exists(os.path.join('images', 'stick_left.png')):
 if os.path.exists(os.path.join('images', 'stick_right.png')):
     datas.append((os.path.join('images', 'stick_right.png'), '.'))
 
+# Window/taskbar icon (bundled into _MEIPASS root for runtime use)
+if os.path.exists('controller.ico'):
+    datas.append(('controller.ico', '.'))
+if os.path.exists('controller.png'):
+    datas.append(('controller.png', '.'))
+
 # Bundled font
 _font_path = os.path.join('src', 'gc_controller', 'fonts', 'VarelaRound-Regular.ttf')
 if os.path.exists(_font_path):

@@ -82,6 +82,7 @@ class GCControllerEnabler:
         self.root.title("NSO GameCube Controller Pairing App")
         self.root.configure(fg_color="#535486")
         self.root.minsize(720, 540)
+        self._set_window_icon()
 
         # Per-slot calibration dicts
         self.slot_calibrations = [dict(DEFAULT_CALIBRATION) for _ in range(MAX_SLOTS)]
@@ -1140,6 +1141,29 @@ class GCControllerEnabler:
             self._cleanup_ble()
 
         self.root.destroy()
+
+    def _set_window_icon(self):
+        """Set the window/taskbar icon across platforms."""
+        try:
+            if sys.platform == "win32":
+                # Tell Windows this is its own app, not "python.exe",
+                # so the taskbar shows our icon instead of the default.
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                    "nso.gamecube-controller-pairing-app")
+
+            # Locate the .ico / .png for the window icon
+            base = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
+            ico_path = os.path.join(base, "controller.ico")
+            png_path = os.path.join(base, "controller.png")
+
+            if sys.platform == "win32" and os.path.exists(ico_path):
+                self.root.iconbitmap(ico_path)
+            elif os.path.exists(png_path):
+                icon = self._tk.PhotoImage(file=png_path)
+                self.root.iconphoto(True, icon)
+        except Exception:
+            pass
 
     def run(self):
         """Start the application."""
