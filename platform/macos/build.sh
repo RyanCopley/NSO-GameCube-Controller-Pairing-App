@@ -19,27 +19,9 @@ pip install -r requirements.txt
 # Create build directory
 mkdir -p dist
 
-# Build executable with PyInstaller
+# Build executable with PyInstaller using the project spec file
 echo "Building executable..."
-pyinstaller --onefile \
-    --windowed \
-    --name "GC-Controller-Enabler" \
-    --paths src \
-    --hidden-import gc_controller.virtual_gamepad \
-    --hidden-import gc_controller.controller_constants \
-    --hidden-import gc_controller.settings_manager \
-    --hidden-import gc_controller.calibration \
-    --hidden-import gc_controller.connection_manager \
-    --hidden-import gc_controller.emulation_manager \
-    --hidden-import gc_controller.controller_ui \
-    --hidden-import gc_controller.input_processor \
-    --hidden-import gc_controller.ble \
-    --hidden-import gc_controller.ble.bleak_backend \
-    --hidden-import gc_controller.ble.bleak_subprocess \
-    --hidden-import gc_controller.ble.sw2_protocol \
-    --hidden-import bleak \
-    --distpath dist/macos \
-    src/gc_controller/__main__.py
+pyinstaller --distpath dist/macos gc_controller_enabler.spec
 
 echo "Build complete! Executable is in dist/macos/"
 echo ""

@@ -17,22 +17,9 @@ pip install -r requirements.txt
 # Create build directory
 mkdir -p dist
 
-# Build executable with PyInstaller
+# Build executable with PyInstaller using the project spec file
 echo "Building executable..."
-pyinstaller --onefile \
-    --name "GC-Controller-Enabler" \
-    --paths src \
-    --hidden-import evdev \
-    --hidden-import gc_controller.virtual_gamepad \
-    --hidden-import gc_controller.controller_constants \
-    --hidden-import gc_controller.settings_manager \
-    --hidden-import gc_controller.calibration \
-    --hidden-import gc_controller.connection_manager \
-    --hidden-import gc_controller.emulation_manager \
-    --hidden-import gc_controller.controller_ui \
-    --hidden-import gc_controller.input_processor \
-    --distpath dist/linux \
-    src/gc_controller/__main__.py
+pyinstaller --distpath dist/linux gc_controller_enabler.spec
 
 echo "Build complete! Executable is in dist/linux/"
 echo ""
