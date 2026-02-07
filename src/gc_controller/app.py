@@ -516,21 +516,15 @@ class GCControllerEnabler:
                 and _mac_re.match(target_addr)):
             target_addr = None
 
-        if target_addr:
-            # Saved address: scan-first with early stop (fast reconnect)
-            self._ble_pair_mode[slot_index] = 'pair'
-            self._send_ble_cmd({
-                "cmd": "scan_connect",
-                "slot_index": slot_index,
-                "target_address": target_addr,
-            })
-        else:
-            # No saved address: scan for devices and show picker
-            self._ble_pair_mode[slot_index] = 'pair'
-            self._send_ble_cmd({
-                "cmd": "scan_devices",
-                "slot_index": slot_index,
-            })
+        # Always use scan_connect: with a target address it stops as soon
+        # as the device is found; without one it scans briefly then tries
+        # each Nintendo-like device via handshake (auto-identify).
+        self._ble_pair_mode[slot_index] = 'pair'
+        self._send_ble_cmd({
+            "cmd": "scan_connect",
+            "slot_index": slot_index,
+            "target_address": target_addr,
+        })
 
     def _on_devices_found(self, slot_index: int, devices: list[dict]):
         """Handle devices_found event: show picker dialog, then connect."""
