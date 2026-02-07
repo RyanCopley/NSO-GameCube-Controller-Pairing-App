@@ -288,8 +288,9 @@ class ControllerUI:
     def update_trigger_display(self, slot_index: int, left_trigger, right_trigger):
         """Update trigger fills and labels for a specific slot."""
         s = self.slots[slot_index]
-        s.controller_visual.update_trigger_fill('left', left_trigger)
-        s.controller_visual.update_trigger_fill('right', right_trigger)
+        cal_mgr = self._slot_cal_mgrs[slot_index]
+        s.controller_visual.update_trigger_fill('left', cal_mgr.calibrate_trigger_fast(left_trigger, 'left'))
+        s.controller_visual.update_trigger_fill('right', cal_mgr.calibrate_trigger_fast(right_trigger, 'right'))
 
     def update_button_display(self, slot_index: int, button_states: Dict[str, bool]):
         """Update button indicators for a specific slot."""
@@ -299,10 +300,12 @@ class ControllerUI:
     def draw_trigger_markers(self, slot_index: int):
         """Redraw trigger bump marker lines from calibration data."""
         s = self.slots[slot_index]
-        cal = self._slot_calibrations[slot_index]
+        cal_mgr = self._slot_cal_mgrs[slot_index]
         for side in ('left', 'right'):
-            bump_val = cal.get(f'trigger_{side}_bump', 190.0)
-            s.controller_visual.draw_trigger_bump_line(side, bump_val)
+            cal = self._slot_calibrations[slot_index]
+            bump_raw = cal.get(f'trigger_{side}_bump', 190.0)
+            bump_calibrated = cal_mgr.calibrate_trigger_fast(int(bump_raw), side)
+            s.controller_visual.draw_trigger_bump_line(side, bump_calibrated)
 
     # ── Calibration mode ─────────────────────────────────────────
 
