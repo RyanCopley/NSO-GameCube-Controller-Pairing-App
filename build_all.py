@@ -104,7 +104,7 @@ def check_dependencies():
             return False
     
     # Check main dependencies
-    required_packages = ["tkinter", "threading", "json"]
+    required_packages = ["PyQt6", "threading", "json"]
     if platform.system().lower() == "windows":
         optional_packages = ["hid", "usb", "vgamepad"]
     elif platform.system().lower() == "linux":

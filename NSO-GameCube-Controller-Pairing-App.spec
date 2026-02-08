@@ -2,6 +2,7 @@
 
 import sys
 import os
+from PyInstaller.utils.hooks import collect_all
 
 if sys.platform == "win32":
     icon_file = 'controller.ico'
@@ -10,12 +11,29 @@ elif sys.platform == "darwin":
 else:
     icon_file = None
 
+# Collect all PyQt6 submodules + data files (plugins, translations, etc.)
+pyqt6_datas, pyqt6_binaries, pyqt6_hiddenimports = collect_all("PyQt6")
+
 a = Analysis(
     ['src/gc_controller/__main__.py'],
     pathex=['src'],
-    binaries=[],
-    datas=[],
-    hiddenimports=['evdev', 'PyQt6.QtWidgets', 'PyQt6.QtGui', 'PyQt6.QtCore', 'PyQt6.sip', 'gc_controller.virtual_gamepad', 'gc_controller.controller_constants', 'gc_controller.settings_manager', 'gc_controller.calibration', 'gc_controller.connection_manager', 'gc_controller.emulation_manager', 'gc_controller.controller_ui', 'gc_controller.input_processor'],
+    binaries=pyqt6_binaries,
+    datas=pyqt6_datas,
+    hiddenimports=[
+        'PyQt6.QtWidgets', 'PyQt6.QtGui', 'PyQt6.QtCore', 'PyQt6.sip',
+        'gc_controller.virtual_gamepad',
+        'gc_controller.controller_constants',
+        'gc_controller.settings_manager',
+        'gc_controller.calibration',
+        'gc_controller.connection_manager',
+        'gc_controller.emulation_manager',
+        'gc_controller.controller_ui',
+        'gc_controller.input_processor',
+        'gc_controller.ui_theme',
+        'gc_controller.ui_controller_canvas',
+        'gc_controller.ui_ble_dialog',
+        'gc_controller.ui_settings_dialog',
+    ] + pyqt6_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

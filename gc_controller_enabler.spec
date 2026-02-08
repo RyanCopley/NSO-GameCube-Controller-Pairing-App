@@ -84,6 +84,10 @@ hiddenimports = [
     'gc_controller.emulation_manager',
     'gc_controller.controller_ui',
     'gc_controller.input_processor',
+    'gc_controller.ui_theme',
+    'gc_controller.ui_controller_canvas',
+    'gc_controller.ui_ble_dialog',
+    'gc_controller.ui_settings_dialog',
     # PyQt6
     'PyQt6.QtWidgets',
     'PyQt6.QtGui',
