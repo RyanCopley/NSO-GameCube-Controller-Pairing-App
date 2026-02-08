@@ -114,12 +114,12 @@ class ControllerUI:
         corner_layout.setContentsMargins(0, 4, 4, 4)
         corner_layout.setSpacing(4)
 
-        save_btn = QPushButton("\U0001F5AB")
+        save_btn = QPushButton("\U0001F5AB\uFE0E")
         save_btn.setProperty("cssClass", "icon-btn")
         save_btn.clicked.connect(on_save)
         corner_layout.addWidget(save_btn)
 
-        gear_btn = QPushButton("\u2699")
+        gear_btn = QPushButton("\u2699\uFE0E")
         gear_btn.setProperty("cssClass", "icon-btn")
         gear_btn.clicked.connect(self.open_settings)
         corner_layout.addWidget(gear_btn)
