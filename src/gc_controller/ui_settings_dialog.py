@@ -6,214 +6,170 @@ auto-connect, start/stop emulation, and test rumble.
 """
 
 import sys
-import tkinter as tk
 import webbrowser
 from typing import Callable, Optional
 
-import customtkinter
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QRadioButton, QCheckBox, QButtonGroup,
+    QFrame,
+)
 
 from . import ui_theme as T
 
 IS_MACOS = sys.platform == "darwin"
 
 
-class SettingsDialog:
-    """Modal settings dialog accessible via the gear icon.
-
-    Contains global settings that apply to all controllers:
-    - Emulation mode (Xbox 360 / Dolphin Pipe)
-    - Trigger mode (100% at bump / 100% at press)
-    - Auto-connect at startup
-    - Start/Stop Emulation (all controllers)
-    - Test Rumble (all emulating controllers)
-    """
+class SettingsDialog(QDialog):
+    """Modal settings dialog accessible via the gear icon."""
 
     def __init__(self, parent,
-                 emu_mode_var: tk.StringVar,
-                 trigger_mode_var: tk.BooleanVar,
-                 auto_connect_var: tk.BooleanVar,
-                 minimize_to_tray_var: tk.BooleanVar,
+                 emu_mode: str,
+                 trigger_bump_100: bool,
+                 auto_connect: bool,
+                 minimize_to_tray: bool,
                  on_emulate_all: Callable,
                  on_test_rumble_all: Callable,
                  is_any_emulating: Callable[[], bool],
                  is_any_connected: Callable[[], bool] = lambda: False,
                  on_save: Optional[Callable] = None):
-        self._parent = parent
-        self._emu_mode_var = emu_mode_var
-        self._trigger_mode_var = trigger_mode_var
-        self._auto_connect_var = auto_connect_var
-        self._minimize_to_tray_var = minimize_to_tray_var
+        super().__init__(parent)
         self._on_emulate_all = on_emulate_all
         self._on_test_rumble_all = on_test_rumble_all
         self._is_any_emulating = is_any_emulating
         self._is_any_connected = is_any_connected
         self._on_save = on_save
 
-        self._dlg = customtkinter.CTkToplevel(parent)
-        self._dlg.title("Settings")
-        self._dlg.resizable(False, False)
-        self._dlg.transient(parent)
-        self._dlg.configure(fg_color=T.GC_PURPLE_DARK)
+        # Result values (updated when save is clicked)
+        self.result_emu_mode = emu_mode
+        self.result_trigger_bump_100 = trigger_bump_100
+        self.result_auto_connect = auto_connect
+        self.result_minimize_to_tray = minimize_to_tray
 
-        outer = customtkinter.CTkFrame(self._dlg, fg_color=T.GC_PURPLE_DARK)
-        outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        self.setWindowTitle("Settings")
+        self.setModal(True)
+        self.setFixedSize(520, 380)
 
-        # ── Two-column layout ──
-        columns = customtkinter.CTkFrame(outer, fg_color="transparent")
-        columns.pack(fill=tk.BOTH, expand=True)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(20, 20, 20, 20)
 
-        left = customtkinter.CTkFrame(columns, fg_color="transparent")
-        left.pack(side=tk.LEFT, fill=tk.BOTH, anchor=tk.N, padx=(0, 16))
+        # ═══ LEFT COLUMN — Settings ═══
+        left = QVBoxLayout()
+        left.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        vsep = customtkinter.CTkFrame(columns, fg_color="#463F6F", width=2)
-        vsep.pack(side=tk.LEFT, fill=tk.Y, pady=4)
+        # Emulation Mode
+        lbl = QLabel("Emulation Mode")
+        lbl.setStyleSheet(f"font-family: '{T.FONT_FAMILY}'; font-size: 16px; font-weight: bold;")
+        left.addWidget(lbl)
 
-        right = customtkinter.CTkFrame(columns, fg_color="transparent")
-        right.pack(side=tk.LEFT, fill=tk.BOTH, anchor=tk.N, padx=(16, 0))
+        self._emu_group = QButtonGroup(self)
+        self._xbox_radio = QRadioButton("Xbox 360")
+        self._dolphin_radio = QRadioButton("Dolphin Pipe")
+        self._emu_group.addButton(self._xbox_radio)
+        self._emu_group.addButton(self._dolphin_radio)
 
-        radio_kwargs = dict(
-            fg_color=T.RADIO_FG,
-            border_color=T.RADIO_BORDER,
-            hover_color=T.RADIO_HOVER,
-            text_color=T.TEXT_PRIMARY,
-            border_width_unchecked=11,
-            border_width_checked=3,
-            radiobutton_width=22,
-            radiobutton_height=22,
-            font=(T.FONT_FAMILY, 14),
-        )
+        if IS_MACOS:
+            self._xbox_radio.setEnabled(False)
+        if emu_mode == 'xbox360':
+            self._xbox_radio.setChecked(True)
+        else:
+            self._dolphin_radio.setChecked(True)
 
-        # ════════════════════════════════════════
-        # LEFT COLUMN — Settings
-        # ════════════════════════════════════════
+        left.addWidget(self._xbox_radio)
+        left.addWidget(self._dolphin_radio)
 
-        # ── Emulation Mode ──
-        customtkinter.CTkLabel(
-            left, text="Emulation Mode",
-            text_color=T.TEXT_PRIMARY, font=(T.FONT_FAMILY, 16, "bold"),
-        ).pack(anchor=tk.W, pady=(0, 4))
+        # Trigger Mode
+        left.addSpacing(8)
+        lbl2 = QLabel("Trigger Mode")
+        lbl2.setStyleSheet(f"font-family: '{T.FONT_FAMILY}'; font-size: 16px; font-weight: bold;")
+        left.addWidget(lbl2)
 
-        xbox_state = 'disabled' if IS_MACOS else 'normal'
-        customtkinter.CTkRadioButton(
-            left, text="Xbox 360",
-            variable=self._emu_mode_var, value='xbox360',
-            state=xbox_state, **radio_kwargs,
-        ).pack(anchor=tk.W, padx=16, pady=1)
+        self._trigger_group = QButtonGroup(self)
+        self._trigger_bump_radio = QRadioButton("100% at bump")
+        self._trigger_press_radio = QRadioButton("100% at press")
+        self._trigger_group.addButton(self._trigger_bump_radio)
+        self._trigger_group.addButton(self._trigger_press_radio)
 
-        customtkinter.CTkRadioButton(
-            left, text="Dolphin Pipe",
-            variable=self._emu_mode_var, value='dolphin_pipe',
-            **radio_kwargs,
-        ).pack(anchor=tk.W, padx=16, pady=1)
+        if trigger_bump_100:
+            self._trigger_bump_radio.setChecked(True)
+        else:
+            self._trigger_press_radio.setChecked(True)
 
-        # ── Trigger Mode ──
-        customtkinter.CTkLabel(
-            left, text="Trigger Mode",
-            text_color=T.TEXT_PRIMARY, font=(T.FONT_FAMILY, 16, "bold"),
-        ).pack(anchor=tk.W, pady=(12, 4))
+        left.addWidget(self._trigger_bump_radio)
+        left.addWidget(self._trigger_press_radio)
 
-        customtkinter.CTkRadioButton(
-            left, text="100% at bump",
-            variable=self._trigger_mode_var, value=True,
-            **radio_kwargs,
-        ).pack(anchor=tk.W, padx=16, pady=1)
+        # Auto-connect
+        left.addSpacing(8)
+        self._auto_connect_cb = QCheckBox("Auto-connect USB at startup")
+        self._auto_connect_cb.setChecked(auto_connect)
+        left.addWidget(self._auto_connect_cb)
 
-        customtkinter.CTkRadioButton(
-            left, text="100% at press",
-            variable=self._trigger_mode_var, value=False,
-            **radio_kwargs,
-        ).pack(anchor=tk.W, padx=16, pady=1)
+        # Minimize to tray
+        self._minimize_tray_cb = QCheckBox("Minimize to system tray")
+        self._minimize_tray_cb.setChecked(minimize_to_tray)
+        left.addWidget(self._minimize_tray_cb)
 
-        # ── Auto-connect ──
-        customtkinter.CTkCheckBox(
-            left, text="Auto-connect USB at startup",
-            variable=self._auto_connect_var,
-            fg_color=T.RADIO_FG,
-            hover_color=T.RADIO_HOVER,
-            checkmark_color=T.BTN_TEXT,
-            border_color=T.RADIO_BORDER,
-            text_color=T.TEXT_PRIMARY,
-            font=(T.FONT_FAMILY, 14),
-        ).pack(anchor=tk.W, pady=(12, 4))
+        # Save button
+        left.addSpacing(8)
+        save_btn = QPushButton("Save")
+        save_btn.setProperty("cssClass", "settings-btn")
+        save_btn.setFixedSize(220, 36)
+        save_btn.clicked.connect(self._on_save_click)
+        left.addWidget(save_btn)
 
-        # ── Minimize to tray ──
-        customtkinter.CTkCheckBox(
-            left, text="Minimize to system tray",
-            variable=self._minimize_to_tray_var,
-            fg_color=T.RADIO_FG,
-            hover_color=T.RADIO_HOVER,
-            checkmark_color=T.BTN_TEXT,
-            border_color=T.RADIO_BORDER,
-            text_color=T.TEXT_PRIMARY,
-            font=(T.FONT_FAMILY, 14),
-        ).pack(anchor=tk.W, pady=(4, 4))
+        outer.addLayout(left)
 
-        # ── Save button ──
-        customtkinter.CTkButton(
-            left, text="Save",
-            command=self._on_save_click,
-            fg_color="#463F6F",
-            hover_color="#5A5190",
-            text_color=T.TEXT_PRIMARY,
-            corner_radius=12, height=36, width=220,
-            font=(T.FONT_FAMILY, 14),
-        ).pack(anchor=tk.W, pady=(12, 0))
+        # Vertical separator
+        vsep = QFrame()
+        vsep.setFrameShape(QFrame.Shape.VLine)
+        vsep.setProperty("cssClass", "vsep")
+        outer.addWidget(vsep)
 
-        # ════════════════════════════════════════
-        # RIGHT COLUMN — Actions & About
-        # ════════════════════════════════════════
+        # ═══ RIGHT COLUMN — Actions & About ═══
+        right = QVBoxLayout()
+        right.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        btn_kwargs = dict(
-            fg_color=T.BTN_FG,
-            hover_color=T.BTN_HOVER,
-            text_color=T.BTN_TEXT,
-            corner_radius=12, height=36,
-            width=220,
-            font=(T.FONT_FAMILY, 14),
-        )
-
-        # ── Start/Stop Emulation ──
         any_connected = self._is_any_connected()
         emu_text = "Stop Emulation" if self._is_any_emulating() else "Start Emulation"
-        self._emulate_btn = customtkinter.CTkButton(
-            right, text=emu_text,
-            command=self._on_emulate_click,
-            state="normal" if any_connected else "disabled",
-            **btn_kwargs,
-        )
-        self._emulate_btn.pack(anchor=tk.W, pady=(0, 4))
 
-        # ── Test Rumble ──
-        self._rumble_btn = customtkinter.CTkButton(
-            right, text="Test Rumble",
-            command=self._on_test_rumble_all,
-            state="normal" if any_connected else "disabled",
-            **btn_kwargs,
-        )
-        self._rumble_btn.pack(anchor=tk.W, pady=4)
+        self._emulate_btn = QPushButton(emu_text)
+        self._emulate_btn.setProperty("cssClass", "settings-action")
+        self._emulate_btn.setFixedSize(220, 36)
+        self._emulate_btn.setEnabled(any_connected)
+        self._emulate_btn.clicked.connect(self._on_emulate_click)
+        right.addWidget(self._emulate_btn)
 
-        # ── About / Credits ──
-        sep2 = customtkinter.CTkFrame(right, fg_color="#463F6F", height=2)
-        sep2.pack(fill=tk.X, pady=(12, 8))
+        self._rumble_btn = QPushButton("Test Rumble")
+        self._rumble_btn.setProperty("cssClass", "settings-action")
+        self._rumble_btn.setFixedSize(220, 36)
+        self._rumble_btn.setEnabled(any_connected)
+        self._rumble_btn.clicked.connect(self._on_test_rumble_all)
+        right.addWidget(self._rumble_btn)
 
-        customtkinter.CTkLabel(
-            right, text="About",
-            text_color=T.TEXT_PRIMARY, font=(T.FONT_FAMILY, 16, "bold"),
-        ).pack(anchor=tk.W, pady=(0, 4))
+        # Separator
+        right.addSpacing(8)
+        hsep = QFrame()
+        hsep.setFrameShape(QFrame.Shape.HLine)
+        hsep.setProperty("cssClass", "hsep")
+        right.addWidget(hsep)
+        right.addSpacing(4)
 
-        src_link = customtkinter.CTkLabel(
-            right, text="Source Code on GitHub",
-            text_color=T.TEXT_SECONDARY, font=(T.FONT_FAMILY, 13, "underline"),
-            cursor="hand2",
-        )
-        src_link.pack(anchor=tk.W, padx=4)
-        src_link.bind("<Button-1>", lambda e: webbrowser.open(
-            "https://github.com/RyanCopley/NSO-GameCube-Controller-Pairing-App"))
+        # About
+        about_lbl = QLabel("About")
+        about_lbl.setStyleSheet(f"font-family: '{T.FONT_FAMILY}'; font-size: 16px; font-weight: bold;")
+        right.addWidget(about_lbl)
 
-        customtkinter.CTkLabel(
-            right, text="Credits & Special Thanks",
-            text_color=T.TEXT_PRIMARY, font=(T.FONT_FAMILY, 14, "bold"),
-        ).pack(anchor=tk.W, pady=(8, 2))
+        src_link = QLabel(
+            '<a href="https://github.com/RyanCopley/NSO-GameCube-Controller-Pairing-App"'
+            f' style="color: {T.TEXT_SECONDARY};">Source Code on GitHub</a>')
+        src_link.setOpenExternalLinks(True)
+        right.addWidget(src_link)
+
+        credits_lbl = QLabel("Credits & Special Thanks")
+        credits_lbl.setStyleSheet(
+            f"font-family: '{T.FONT_FAMILY}'; font-size: 14px; font-weight: bold;")
+        right.addWidget(credits_lbl)
 
         credits = [
             ("GVNPWRS/NSO-GC-Controller-PC", "https://github.com/GVNPWRS/NSO-GC-Controller-PC"),
@@ -222,46 +178,25 @@ class SettingsDialog:
             ("darthcloud/BlueRetro", "https://github.com/darthcloud/BlueRetro"),
         ]
         for label_text, url in credits:
-            lbl = customtkinter.CTkLabel(
-                right, text=label_text,
-                text_color=T.TEXT_SECONDARY, font=(T.FONT_FAMILY, 12, "underline"),
-                cursor="hand2",
-            )
-            lbl.pack(anchor=tk.W, padx=12)
-            lbl.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+            lbl = QLabel(
+                f'<a href="{url}" style="color: {T.TEXT_SECONDARY};">{label_text}</a>')
+            lbl.setOpenExternalLinks(True)
+            lbl.setContentsMargins(12, 0, 0, 0)
+            right.addWidget(lbl)
 
-        self._dlg.protocol("WM_DELETE_WINDOW", self._dlg.destroy)
-
-        # Center on parent
-        self._dlg.update_idletasks()
-        pw = parent.winfo_width()
-        ph = parent.winfo_height()
-        px = parent.winfo_x()
-        py = parent.winfo_y()
-        dw = self._dlg.winfo_width()
-        dh = self._dlg.winfo_height()
-        x = px + (pw - dw) // 2
-        y = py + (ph - dh) // 2
-        self._dlg.geometry(f"+{x}+{y}")
-
-        # grab_set after window is visible to avoid TclError
-        self._dlg.after(10, self._dlg.grab_set)
+        right.addStretch()
+        outer.addLayout(right)
 
     def _on_save_click(self):
+        self.result_emu_mode = 'xbox360' if self._xbox_radio.isChecked() else 'dolphin_pipe'
+        self.result_trigger_bump_100 = self._trigger_bump_radio.isChecked()
+        self.result_auto_connect = self._auto_connect_cb.isChecked()
+        self.result_minimize_to_tray = self._minimize_tray_cb.isChecked()
         if self._on_save:
             self._on_save()
-        self._dlg.destroy()
+        self.accept()
 
     def _on_emulate_click(self):
         self._on_emulate_all()
-        # Update button text after toggle
         emu_text = "Stop Emulation" if self._is_any_emulating() else "Start Emulation"
-        self._emulate_btn.configure(text=emu_text)
-
-    def update_emulate_button(self):
-        """Update the emulate button text based on current state."""
-        try:
-            emu_text = "Stop Emulation" if self._is_any_emulating() else "Start Emulation"
-            self._emulate_btn.configure(text=emu_text)
-        except Exception:
-            pass
+        self._emulate_btn.setText(emu_text)

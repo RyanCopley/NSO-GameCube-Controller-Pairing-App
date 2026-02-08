@@ -17,32 +17,12 @@ else:  # Linux and other Unix-like systems
 
 block_cipher = None
 
-# Collect all customtkinter submodules + data files (themes, fonts, icons).
-# PyInstaller's auto-discovery of the customtkinter hook is unreliable on
-# macOS/Windows, so we explicitly collect everything here.
-ctk_datas, ctk_binaries, ctk_hiddenimports = collect_all("customtkinter")
-
-# Collect pystray and its dependencies
-pystray_datas, pystray_binaries, pystray_hiddenimports = collect_all("pystray")
-
-# On Linux, collect GObject Introspection typelib files for the AppIndicator
-# tray backend. PyInstaller's gi hooks bundle the .typelib data automatically
-# when we collect_all the relevant gi subpackages.
-gi_datas = []
-gi_binaries = []
-gi_hiddenimports = []
-if sys.platform == "linux":
-    try:
-        _gi_datas, _gi_binaries, _gi_hiddenimports = collect_all("gi")
-        gi_datas = _gi_datas
-        gi_binaries = _gi_binaries
-        gi_hiddenimports = _gi_hiddenimports
-    except Exception:
-        pass  # gi not available — will fall back to XOrg backend
+# Collect all PyQt6 submodules + data files (plugins, translations, etc.)
+pyqt6_datas, pyqt6_binaries, pyqt6_hiddenimports = collect_all("PyQt6")
 
 # Data files to include
-datas = ctk_datas + pystray_datas + gi_datas
-binaries = ctk_binaries + pystray_binaries + gi_binaries
+datas = pyqt6_datas
+binaries = pyqt6_binaries
 if os.path.exists(os.path.join('images', 'controller.png')):
     datas.append((os.path.join('images', 'controller.png'), '.'))
 if os.path.exists(os.path.join('images', 'stick_left.png')):
@@ -104,16 +84,12 @@ hiddenimports = [
     'gc_controller.emulation_manager',
     'gc_controller.controller_ui',
     'gc_controller.input_processor',
-    'tkinter',
-    'tkinter.ttk',
-    '_tkinter',
-    'PIL._tkinter_finder',
-    # pystray — dynamic backend selection requires explicit imports
-    'pystray',
-    'pystray._base',
-    'pystray._util',
-    'six',
-] + ctk_hiddenimports + pystray_hiddenimports + gi_hiddenimports
+    # PyQt6
+    'PyQt6.QtWidgets',
+    'PyQt6.QtGui',
+    'PyQt6.QtCore',
+    'PyQt6.sip',
+] + pyqt6_hiddenimports
 
 # Platform-conditional hidden imports
 if sys.platform == "win32":
@@ -127,9 +103,6 @@ if sys.platform == "win32":
         'gc_controller.ble.bleak_backend',
         'gc_controller.ble.bleak_subprocess',
         'gc_controller.ble.sw2_protocol',
-        # pystray win32 backend
-        'pystray._win32',
-        'pystray._util.win32',
     ]
 elif sys.platform == "darwin":
     hiddenimports += [
@@ -138,8 +111,6 @@ elif sys.platform == "darwin":
         'gc_controller.ble.bleak_backend',
         'gc_controller.ble.bleak_subprocess',
         'gc_controller.ble.sw2_protocol',
-        # pystray macOS backend (requires pyobjc-framework-Cocoa)
-        'pystray._darwin',
         'AppKit',
         'Foundation',
         'objc',
@@ -160,16 +131,6 @@ elif sys.platform == "linux":
         'gc_controller.ble.bumble_backend',
         'gc_controller.ble.ble_subprocess',
         'gc_controller.ble.sw2_protocol',
-        # pystray AppIndicator backend (requires python3-gi + gir1.2-appindicator3-0.1)
-        'pystray._appindicator',
-        'pystray._util.gtk',
-        'pystray._xorg',  # fallback if AppIndicator unavailable
-        'gi',
-        'gi.repository.Gtk',
-        'gi.repository.GLib',
-        'gi.repository.GObject',
-        'gi.repository.GdkPixbuf',
-        'gi.repository.AppIndicator3',
     ]
 
 a = Analysis(

@@ -10,9 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "hidapi>=0.14.0",
     "pyusb>=1.2.1",
-    "customtkinter>=5.2.0",
-    "Pillow>=9.0.0",
-    "pystray>=0.19.0",
+    "PyQt6>=6.6.0",
     "vgamepad>=0.0.8; sys_platform == 'win32'",
     "evdev>=1.7.0; sys_platform == 'linux'",
     "bleak>=0.21.0; sys_platform == 'darwin'",

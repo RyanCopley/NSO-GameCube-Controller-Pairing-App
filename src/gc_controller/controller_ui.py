@@ -2,15 +2,18 @@
 Controller UI
 
 All UI widget creation and update methods for the NSO GameCube Controller Pairing App.
-Uses customtkinter for modern rounded widgets and a GameCube purple theme.
-Supports up to 4 controller tabs via CTkTabview.
+Uses PyQt6 for modern widgets and a GameCube purple theme.
+Supports up to 4 controller tabs via QTabWidget.
 """
 
 import sys
-import tkinter as tk
 from typing import Dict, Callable, List, Optional
 
-import customtkinter
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
+    QPushButton, QLabel,
+)
 
 from .controller_constants import MAX_SLOTS
 from .calibration import CalibrationManager
@@ -24,7 +27,7 @@ class SlotUI:
     """Holds all per-tab widget references for one controller slot."""
 
     def __init__(self):
-        self.tab_frame = None
+        self.tab_widget = None
         self.connect_btn = None
 
         # BLE section
@@ -33,9 +36,8 @@ class SlotUI:
         # Shared status label
         self.status_label = None
 
-        # Controller visual (replaces separate stick/trigger/button widgets)
+        # Controller visual
         self.controller_visual: Optional[GCControllerVisual] = None
-
 
         # Calibration
         self.stick_cal_btn = None
@@ -63,18 +65,14 @@ class ControllerUI:
         self._slot_cal_mgrs = slot_cal_mgrs
         self._ble_available = ble_available
 
-        self._trigger_bar_width = 150
-        self._trigger_bar_height = 20
-
-        # Global UI variables
-        self.auto_connect_var = tk.BooleanVar(value=slot_calibrations[0]['auto_connect'])
-
+        # Settings values (plain Python — no Tk variables)
         emu_default = slot_calibrations[0]['emulation_mode']
         if IS_MACOS and emu_default == 'xbox360':
             emu_default = 'dolphin_pipe'
-        self.emu_mode_var = tk.StringVar(value=emu_default)
-        self.trigger_mode_var = tk.BooleanVar(value=slot_calibrations[0]['trigger_bump_100_percent'])
-        self.minimize_to_tray_var = tk.BooleanVar(value=slot_calibrations[0].get('minimize_to_tray', False))
+        self.emu_mode = emu_default
+        self.trigger_bump_100 = slot_calibrations[0]['trigger_bump_100_percent']
+        self.auto_connect = slot_calibrations[0]['auto_connect']
+        self.minimize_to_tray = slot_calibrations[0].get('minimize_to_tray', False)
 
         # Callbacks for settings dialog
         self._on_emulate_all = on_emulate_all
@@ -90,9 +88,6 @@ class ControllerUI:
         # Settings dialog reference
         self._settings_dialog = None
 
-        # Tab name tracking for CTkTabview rename
-        self._tab_names: List[str] = []
-
         self.slots: List[SlotUI] = []
         self._setup(on_connect, on_stick_cal, on_trigger_cal, on_save,
                     on_pair)
@@ -103,96 +98,65 @@ class ControllerUI:
 
     def _setup(self, on_connect, on_stick_cal, on_trigger_cal, on_save,
                on_pair=None):
-        """Create the user interface with tabview tabs."""
-        outer_frame = customtkinter.CTkFrame(self._root, fg_color="transparent")
-        outer_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        """Create the user interface with tab widget."""
+        outer = QWidget(self._root)
+        outer_layout = QVBoxLayout(outer)
+        outer_layout.setContentsMargins(10, 10, 10, 10)
+        self._root.setCentralWidget(outer)
 
-        # Configure root grid
-        self._root.grid_rowconfigure(0, weight=1)
-        self._root.grid_columnconfigure(0, weight=1)
+        # Tab widget with corner icon buttons
+        self.tabview = QTabWidget()
+        outer_layout.addWidget(self.tabview)
 
-        # CTkTabview with 4 tabs
-        self.tabview = customtkinter.CTkTabview(
-            outer_frame,
-            fg_color=T.GC_PURPLE_DARK,
-            segmented_button_fg_color=T.GC_PURPLE_DARK,
-            segmented_button_selected_color="#463F6F",
-            segmented_button_unselected_color=T.GC_PURPLE_DARK,
-            segmented_button_selected_hover_color=T.GC_PURPLE_LIGHT,
-            segmented_button_unselected_hover_color=T.GC_PURPLE_MID,
-            text_color=T.TEXT_PRIMARY,
-            text_color_disabled=T.TEXT_DIM,
-            corner_radius=12,
-        )
-        self.tabview._segmented_button.configure(font=(T.FONT_FAMILY, 15))
-        self.tabview.grid(row=0, column=0, sticky="nsew")
-        outer_frame.grid_rowconfigure(0, weight=1)
-        outer_frame.grid_columnconfigure(0, weight=1)
+        # Save + gear buttons as corner widget
+        corner = QWidget()
+        corner_layout = QHBoxLayout(corner)
+        corner_layout.setContentsMargins(0, 4, 4, 4)
+        corner_layout.setSpacing(4)
 
-        # Save + gear buttons overlaid in the top-right of the tabview
-        icon_base = dict(
-            fg_color="#463F6F",
-            hover_color="#5A5190",
-            text_color=T.TEXT_PRIMARY,
-            corner_radius=8,
-        )
+        save_btn = QPushButton("\U0001F5AB")
+        save_btn.setProperty("cssClass", "icon-btn")
+        save_btn.clicked.connect(on_save)
+        corner_layout.addWidget(save_btn)
 
-        icon_frame = customtkinter.CTkFrame(self.tabview, fg_color="transparent")
-        icon_frame.place(relx=1.0, y=0, anchor="ne")
+        gear_btn = QPushButton("\u2699")
+        gear_btn.setProperty("cssClass", "icon-btn")
+        gear_btn.clicked.connect(self.open_settings)
+        corner_layout.addWidget(gear_btn)
 
-        customtkinter.CTkButton(
-            icon_frame, text="\U0001F5AB",
-            command=on_save,
-            width=40, height=40, font=("", 24),
-            **icon_base,
-        ).pack(side=tk.LEFT, padx=(0, 4))
-
-        customtkinter.CTkButton(
-            icon_frame, text="\u2699",
-            command=self.open_settings,
-            width=40, height=40, font=("", 24),
-            **icon_base,
-        ).pack(side=tk.LEFT)
+        self.tabview.setCornerWidget(corner, Qt.Corner.TopRightCorner)
+        # Match tab bar height to corner widget so tabs vertically center
+        self.tabview.tabBar().setFixedHeight(48)
 
         for i in range(MAX_SLOTS):
             tab_name = f"Controller {i + 1}"
-            self.tabview.add(tab_name)
-            self._tab_names.append(tab_name)
-
             slot_ui = SlotUI()
-            self._build_tab(i, slot_ui, on_connect,
+            tab_widget = QWidget()
+            slot_ui.tab_widget = tab_widget
+            self.tabview.addTab(tab_widget, tab_name)
+
+            self._build_tab(i, slot_ui, tab_widget, on_connect,
                             on_stick_cal, on_trigger_cal, on_pair)
             self.slots.append(slot_ui)
 
-        # Track global setting changes
-        self.auto_connect_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
-        self.emu_mode_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
-        self.trigger_mode_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
-        self.minimize_to_tray_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
-
-    def _build_tab(self, index: int, slot_ui: SlotUI,
+    def _build_tab(self, index: int, slot_ui: SlotUI, tab_widget: QWidget,
                    on_connect, on_stick_cal, on_trigger_cal,
                    on_pair=None):
         """Build one controller tab."""
-        tab_name = self._tab_names[index]
-        tab = self.tabview.tab(tab_name)
-        slot_ui.tab_frame = tab
-
         cal = self._slot_calibrations[index]
+        layout = QVBoxLayout(tab_widget)
+        layout.setContentsMargins(5, 5, 5, 5)
 
-        # ── Controller Visual (center) with status bar inside ──
-        visual_frame = customtkinter.CTkFrame(tab, fg_color="transparent")
-        visual_frame.grid(row=0, column=0, columnspan=2, padx=5, pady=(5, 8))
+        # Controller Visual
+        slot_ui.controller_visual = GCControllerVisual()
+        layout.addWidget(slot_ui.controller_visual, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        slot_ui.controller_visual = GCControllerVisual(visual_frame)
-        slot_ui.controller_visual.pack(padx=8, pady=(8, 0))
-
-        slot_ui.status_label = customtkinter.CTkLabel(
-            visual_frame, text="Ready to connect",
-            text_color="#FFFFFF", font=(T.FONT_FAMILY, 14),
-            anchor="center",
-        )
-        slot_ui.status_label.pack(fill=tk.X, padx=10, pady=(2, 8))
+        # Status label
+        slot_ui.status_label = QLabel("Ready to connect")
+        slot_ui.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        slot_ui.status_label.setStyleSheet(
+            f"color: {T.TEXT_PRIMARY}; font-family: '{T.FONT_FAMILY}'; font-size: 14px;")
+        layout.addWidget(slot_ui.status_label)
 
         # Draw saved octagons
         for side in ('left', 'right'):
@@ -205,89 +169,79 @@ class ControllerUI:
             bump_val = cal.get(f'trigger_{side}_bump', 190.0)
             slot_ui.controller_visual.draw_trigger_bump_line(side, bump_val)
 
-        # ── Bottom button row ──
-        btn_frame = customtkinter.CTkFrame(tab, fg_color="transparent")
-        btn_frame.grid(row=1, column=0, columnspan=2, sticky="ew",
-                        padx=5, pady=(0, 5))
+        # Bottom button row
+        btn_layout = QHBoxLayout()
 
-        btn_kwargs = dict(
-            fg_color=T.BTN_FG,
-            hover_color=T.BTN_HOVER,
-            text_color=T.BTN_TEXT,
-            corner_radius=12, height=32,
-            font=(T.FONT_FAMILY, 14),
-        )
-
-        slot_ui.connect_btn = customtkinter.CTkButton(
-            btn_frame, text="Connect USB",
-            command=lambda i=index: on_connect(i),
-            **btn_kwargs,
-        )
-        slot_ui.connect_btn.pack(side=tk.LEFT, padx=(0, 4), expand=True, fill=tk.X)
+        slot_ui.connect_btn = QPushButton("Connect USB")
+        slot_ui.connect_btn.clicked.connect(lambda checked, i=index: on_connect(i))
+        btn_layout.addWidget(slot_ui.connect_btn)
 
         if self._ble_available and on_pair:
-            slot_ui.pair_btn = customtkinter.CTkButton(
-                btn_frame, text="Connect Wireless",
-                command=lambda i=index: on_pair(i),
-                **btn_kwargs,
-            )
-            slot_ui.pair_btn.pack(side=tk.LEFT, padx=4, expand=True, fill=tk.X)
+            slot_ui.pair_btn = QPushButton("Connect Wireless")
+            slot_ui.pair_btn.clicked.connect(lambda checked, i=index: on_pair(i))
+            btn_layout.addWidget(slot_ui.pair_btn)
 
-        slot_ui.stick_cal_btn = customtkinter.CTkButton(
-            btn_frame, text="Calibrate Sticks",
-            command=lambda i=index: on_stick_cal(i),
-            **btn_kwargs,
-        )
-        slot_ui.stick_cal_btn.pack(side=tk.LEFT, padx=4, expand=True, fill=tk.X)
+        slot_ui.stick_cal_btn = QPushButton("Calibrate Sticks")
+        slot_ui.stick_cal_btn.clicked.connect(lambda checked, i=index: on_stick_cal(i))
+        btn_layout.addWidget(slot_ui.stick_cal_btn)
 
-        slot_ui.trigger_cal_btn = customtkinter.CTkButton(
-            btn_frame, text="Calibrate Triggers",
-            command=lambda i=index: on_trigger_cal(i),
-            **btn_kwargs,
-        )
-        slot_ui.trigger_cal_btn.pack(side=tk.LEFT, padx=(4, 0), expand=True, fill=tk.X)
+        slot_ui.trigger_cal_btn = QPushButton("Calibrate Triggers")
+        slot_ui.trigger_cal_btn.clicked.connect(lambda checked, i=index: on_trigger_cal(i))
+        btn_layout.addWidget(slot_ui.trigger_cal_btn)
+
+        layout.addLayout(btn_layout)
 
         # Hidden status labels for calibration feedback
-        slot_ui.stick_cal_status = customtkinter.CTkLabel(
-            btn_frame, text="", text_color=T.TEXT_DIM, font=(T.FONT_FAMILY, 12),
-        )
-        slot_ui.trigger_cal_status = customtkinter.CTkLabel(
-            btn_frame, text="", text_color=T.TEXT_DIM, font=(T.FONT_FAMILY, 12),
-        )
+        slot_ui.stick_cal_status = QLabel("")
+        slot_ui.stick_cal_status.setStyleSheet(
+            f"color: {T.TEXT_DIM}; font-family: '{T.FONT_FAMILY}'; font-size: 12px;")
+        slot_ui.stick_cal_status.setVisible(False)
+        layout.addWidget(slot_ui.stick_cal_status)
 
-        # Configure grid weights
-        tab.grid_columnconfigure(0, weight=1)
+        slot_ui.trigger_cal_status = QLabel("")
+        slot_ui.trigger_cal_status.setStyleSheet(
+            f"color: {T.TEXT_DIM}; font-family: '{T.FONT_FAMILY}'; font-size: 12px;")
+        slot_ui.trigger_cal_status.setVisible(False)
+        layout.addWidget(slot_ui.trigger_cal_status)
 
     # ── Settings dialog ─────────────────────────────────────────────
 
     def open_settings(self):
         """Open the global settings dialog."""
         from .ui_settings_dialog import SettingsDialog
-        self._settings_dialog = SettingsDialog(
+        dlg = SettingsDialog(
             self._root,
-            emu_mode_var=self.emu_mode_var,
-            trigger_mode_var=self.trigger_mode_var,
-            auto_connect_var=self.auto_connect_var,
-            minimize_to_tray_var=self.minimize_to_tray_var,
+            emu_mode=self.emu_mode,
+            trigger_bump_100=self.trigger_bump_100,
+            auto_connect=self.auto_connect,
+            minimize_to_tray=self.minimize_to_tray,
             on_emulate_all=self._on_emulate_all if self._on_emulate_all else lambda: None,
             on_test_rumble_all=self._on_test_rumble_all if self._on_test_rumble_all else lambda: None,
             is_any_emulating=lambda: any(self._slot_emulating),
             is_any_connected=lambda: any(self._slot_connected),
             on_save=self._on_save,
         )
+        if dlg.exec():
+            # Update values from dialog results
+            old_emu = self.emu_mode
+            old_trigger = self.trigger_bump_100
+            old_auto = self.auto_connect
+            old_tray = self.minimize_to_tray
+
+            self.emu_mode = dlg.result_emu_mode
+            self.trigger_bump_100 = dlg.result_trigger_bump_100
+            self.auto_connect = dlg.result_auto_connect
+            self.minimize_to_tray = dlg.result_minimize_to_tray
+
+            if (self.emu_mode != old_emu or self.trigger_bump_100 != old_trigger
+                    or self.auto_connect != old_auto or self.minimize_to_tray != old_tray):
+                self.mark_slot_dirty(0)
 
     # ── UI update methods ────────────────────────────────────────────
 
     def update_stick_position(self, slot_index: int, side: str,
                               x_norm: float, y_norm: float):
-        """Update analog stick position on the controller visual.
-
-        Args:
-            slot_index: which controller slot.
-            side: 'left' or 'right'.
-            x_norm: normalized X in [-1, 1].
-            y_norm: normalized Y in [-1, 1].
-        """
+        """Update analog stick position on the controller visual."""
         s = self.slots[slot_index]
         s.controller_visual.update_stick_position(side, x_norm, y_norm)
 
@@ -352,17 +306,7 @@ class ControllerUI:
         base = f"Controller {slot_index + 1}"
         dirty = " *" if self._slot_dirty[slot_index] else ""
         new_name = prefix + base + dirty
-        old_name = self._tab_names[slot_index]
-
-        if new_name != old_name:
-            try:
-                self.tabview.rename(old_name, new_name)
-                self._tab_names[slot_index] = new_name
-                # Fix CTkTabview bug: rename() doesn't update _current_name
-                if getattr(self.tabview, '_current_name', None) == old_name:
-                    self.tabview._current_name = new_name
-            except Exception:
-                pass
+        self.tabview.setTabText(slot_index, new_name)
 
     def mark_slot_dirty(self, slot_index: int):
         """Mark a slot as having unsaved changes."""
@@ -398,7 +342,7 @@ class ControllerUI:
         """Update the shared status label for a specific slot."""
         s = self.slots[slot_index]
         if s.status_label is not None:
-            s.status_label.configure(text=message)
+            s.status_label.setText(message)
 
     def update_ble_status(self, slot_index: int, message: str):
         """Update status with a BLE message."""

@@ -4,11 +4,8 @@ UI Theme - GameCube Indigo Purple
 Color constants and theme configuration for the NSO GameCube Controller Pairing App.
 """
 
-import ctypes
 import os
 import sys
-
-import customtkinter
 
 # ── Main purple palette ──────────────────────────────────────────
 GC_PURPLE_DARK = "#535486"       # window/app background
@@ -80,39 +77,204 @@ _FONT_FILE = os.path.join(_FONT_DIR, "VarelaRound-Regular.ttf")
 
 
 def _register_font():
-    """Register the bundled Varela Round font with the OS so Tk can find it."""
+    """Register the bundled Varela Round font with Qt's font database."""
     if not os.path.isfile(_FONT_FILE):
         return
     try:
-        if sys.platform == "linux":
-            fontconfig = ctypes.cdll.LoadLibrary("libfontconfig.so.1")
-            fontconfig.FcConfigAppFontAddFile.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-            fontconfig.FcConfigAppFontAddFile.restype = ctypes.c_int
-            fontconfig.FcConfigAppFontAddFile(None, _FONT_FILE.encode("utf-8"))
-        elif sys.platform == "win32":
-            ctypes.windll.gdi32.AddFontResourceExW(_FONT_FILE, 0x10, 0)
-        elif sys.platform == "darwin":
-            from ctypes import util as _cu
-            ct = ctypes.cdll.LoadLibrary(_cu.find_library("CoreText"))
-            cf = ctypes.cdll.LoadLibrary(_cu.find_library("CoreFoundation"))
-            cf.CFStringCreateWithCString.restype = ctypes.c_void_p
-            cf.CFStringCreateWithCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
-            cf.CFURLCreateWithFileSystemPath.restype = ctypes.c_void_p
-            cf.CFURLCreateWithFileSystemPath.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int32, ctypes.c_bool]
-            cf.CFRelease.argtypes = [ctypes.c_void_p]
-            ct.CTFontManagerRegisterFontsForURL.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]
-            ct.CTFontManagerRegisterFontsForURL.restype = ctypes.c_bool
-            s = cf.CFStringCreateWithCString(None, _FONT_FILE.encode("utf-8"), 0x08000100)
-            url = cf.CFURLCreateWithFileSystemPath(None, s, 0, False)
-            ct.CTFontManagerRegisterFontsForURL(url, 0, None)
-            cf.CFRelease(url)
-            cf.CFRelease(s)
+        from PyQt6.QtGui import QFontDatabase
+        QFontDatabase.addApplicationFont(_FONT_FILE)
     except Exception:
         pass
 
 
-def apply_gc_theme():
-    """Configure customtkinter for the GC dark-purple theme."""
+def apply_gc_theme(app):
+    """Configure PyQt6 QApplication for the GC dark-purple theme."""
     _register_font()
-    customtkinter.set_appearance_mode("dark")
-    customtkinter.set_default_color_theme("dark-blue")
+    app.setStyleSheet(f"""
+        QMainWindow, QWidget {{
+            background-color: {GC_PURPLE_DARK};
+            color: {TEXT_PRIMARY};
+            font-family: "{FONT_FAMILY}", sans-serif;
+        }}
+        QLabel {{
+            color: {TEXT_PRIMARY};
+            background: transparent;
+        }}
+        QPushButton {{
+            background-color: {BTN_FG};
+            color: {BTN_TEXT};
+            border: none;
+            border-radius: 12px;
+            padding: 6px 12px;
+            font-family: "{FONT_FAMILY}", sans-serif;
+            font-size: 14px;
+            min-height: 28px;
+        }}
+        QPushButton:hover {{
+            background-color: {BTN_HOVER};
+        }}
+        QPushButton:disabled {{
+            background-color: #888888;
+            color: #555555;
+        }}
+        QPushButton[cssClass="icon-btn"] {{
+            background-color: #463F6F;
+            color: {TEXT_PRIMARY};
+            border-radius: 8px;
+            padding: 4px;
+            min-width: 36px;
+            max-width: 36px;
+            min-height: 36px;
+            max-height: 36px;
+            font-size: 22px;
+        }}
+        QPushButton[cssClass="icon-btn"]:hover {{
+            background-color: #5A5190;
+        }}
+        QPushButton[cssClass="settings-btn"] {{
+            background-color: #463F6F;
+            color: {TEXT_PRIMARY};
+            border-radius: 12px;
+            font-size: 14px;
+        }}
+        QPushButton[cssClass="settings-btn"]:hover {{
+            background-color: #5A5190;
+        }}
+        QPushButton[cssClass="settings-action"] {{
+            background-color: {BTN_FG};
+            color: {BTN_TEXT};
+            border-radius: 12px;
+            font-size: 14px;
+        }}
+        QPushButton[cssClass="settings-action"]:hover {{
+            background-color: {BTN_HOVER};
+        }}
+        QPushButton[cssClass="cancel-btn"] {{
+            background-color: {GC_PURPLE_SURFACE};
+            color: {TEXT_PRIMARY};
+            border-radius: 12px;
+        }}
+        QPushButton[cssClass="cancel-btn"]:hover {{
+            background-color: {GC_PURPLE_LIGHT};
+        }}
+        QPushButton[cssClass="connect-btn"] {{
+            background-color: {GC_PURPLE_MID};
+            color: {TEXT_PRIMARY};
+            border-radius: 12px;
+        }}
+        QPushButton[cssClass="connect-btn"]:hover {{
+            background-color: {GC_PURPLE_LIGHT};
+        }}
+        QTabWidget::pane {{
+            background-color: {GC_PURPLE_DARK};
+            border: none;
+        }}
+        QTabBar {{
+            background-color: {GC_PURPLE_DARK};
+            qproperty-drawBase: 0;
+        }}
+        QTabBar::tab {{
+            background-color: {GC_PURPLE_DARK};
+            color: {TEXT_PRIMARY};
+            padding: 14px 16px;
+            border: none;
+            font-family: "{FONT_FAMILY}", sans-serif;
+            font-size: 15px;
+        }}
+        QTabBar::tab:selected {{
+            background-color: #463F6F;
+            border-radius: 8px;
+        }}
+        QTabBar::tab:hover:!selected {{
+            background-color: {GC_PURPLE_MID};
+            border-radius: 8px;
+        }}
+        QRadioButton {{
+            color: {TEXT_PRIMARY};
+            font-family: "{FONT_FAMILY}", sans-serif;
+            font-size: 14px;
+            spacing: 8px;
+        }}
+        QRadioButton::indicator {{
+            width: 20px;
+            height: 20px;
+            border: 2px solid {RADIO_BORDER};
+            border-radius: 12px;
+            background-color: transparent;
+        }}
+        QRadioButton::indicator:checked {{
+            border: 2px solid {RADIO_BORDER};
+            border-radius: 12px;
+            background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+                stop:0 white, stop:0.4 white, stop:0.5 transparent, stop:1.0 transparent);
+        }}
+        QRadioButton::indicator:hover {{
+            border-color: {RADIO_HOVER};
+        }}
+        QRadioButton:disabled {{
+            color: {TEXT_DIM};
+        }}
+        QRadioButton::indicator:disabled {{
+            border-color: {TEXT_DIM};
+        }}
+        QCheckBox {{
+            color: {TEXT_PRIMARY};
+            font-family: "{FONT_FAMILY}", sans-serif;
+            font-size: 14px;
+            spacing: 8px;
+        }}
+        QCheckBox::indicator {{
+            width: 20px;
+            height: 20px;
+            border: 2px solid {RADIO_BORDER};
+            border-radius: 4px;
+            background-color: transparent;
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {RADIO_FG};
+            border-color: {RADIO_BORDER};
+        }}
+        QCheckBox::indicator:hover {{
+            border-color: {RADIO_HOVER};
+        }}
+        QTableWidget {{
+            background-color: {SURFACE_DARK};
+            color: {TEXT_PRIMARY};
+            gridline-color: #333;
+            border: none;
+            font-size: 11px;
+        }}
+        QTableWidget::item {{
+            padding: 4px;
+        }}
+        QTableWidget::item:selected {{
+            background-color: {GC_PURPLE_LIGHT};
+            color: {TEXT_PRIMARY};
+        }}
+        QHeaderView::section {{
+            background-color: {GC_PURPLE_MID};
+            color: {TEXT_PRIMARY};
+            border: none;
+            padding: 4px 8px;
+            font-weight: bold;
+            font-size: 11px;
+        }}
+        QFrame[cssClass="vsep"] {{
+            background-color: #463F6F;
+            max-width: 2px;
+            min-width: 2px;
+        }}
+        QFrame[cssClass="hsep"] {{
+            background-color: #463F6F;
+            max-height: 2px;
+            min-height: 2px;
+        }}
+        QMenu {{
+            background-color: {GC_PURPLE_DARK};
+            color: {TEXT_PRIMARY};
+            border: 1px solid #463F6F;
+        }}
+        QMenu::item:selected {{
+            background-color: {GC_PURPLE_LIGHT};
+        }}
+    """)

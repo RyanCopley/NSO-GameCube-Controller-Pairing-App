@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-NSO GameCube Controller Pairing App — a cross-platform Python/Tkinter application that makes Nintendo Switch Online GameCube controllers work as Xbox 360 controllers or Dolphin emulator input via USB or Bluetooth. Supports up to 4 simultaneous controllers with independent calibration.
+NSO GameCube Controller Pairing App — a cross-platform Python/PyQt6 application that makes Nintendo Switch Online GameCube controllers work as Xbox 360 controllers or Dolphin emulator input via USB or Bluetooth. Supports up to 4 simultaneous controllers with independent calibration.
 
 ## Build & Run Commands
 
@@ -33,7 +33,7 @@ There is no test suite in this project.
 The app follows a **per-slot architecture** — up to 4 independent controller slots, each with its own managers:
 
 ```
-GUI (customtkinter) → App Orchestrator (app.py)
+GUI (PyQt6) → App Orchestrator (app.py)
   → ControllerSlot (controller_slot.py) — per-slot state container
     ├── ConnectionManager  — USB HID init via hidapi/pyusb
     ├── InputProcessor     — dedicated HID read thread per slot
@@ -67,7 +67,7 @@ GUI (customtkinter) → App Orchestrator (app.py)
 - **ui_controller_canvas.py** — Stick/trigger visualization canvas
 - **ui_ble_dialog.py** — BLE device picker dialog
 - **ui_settings_dialog.py** — Settings dialog
-- **ui_theme.py** — CustomTkinter theme configuration
+- **ui_theme.py** — PyQt6 QSS theme configuration
 
 ## Platform-Specific Notes
 
@@ -79,20 +79,20 @@ GUI (customtkinter) → App Orchestrator (app.py)
 
 ## Important Patterns
 
-- **Thread safety**: Calibration modifications use locks; UI updates go through `root.after()` to stay on the Tkinter main thread
+- **Thread safety**: Calibration modifications use locks; UI updates go through `pyqtSignal.emit()` to stay on the Qt main thread
 - **Device claiming**: Path-based to prevent two slots from connecting to the same physical controller
 - **Report formats**: Standard GC USB binary format vs Windows NSO (report ID 0x05, different button encoding handled via `_translate_report_0x05()`) vs BLE (63-byte native Switch format)
 - **Platform detection**: Uses `sys.platform` throughout (`win32`, `linux`, `darwin`)
 - **BLE state**: Lazy initialization on first pair; subprocess messaging via events/queues
 - **PyInstaller builds**: vgamepad DLL paths need special handling in frozen builds via `sys._MEIPASS`
 - **Entry points**: `--ble-subprocess` and `--bleak-subprocess` flags in `__main__.py` dispatch to BLE subprocess runners instead of the main app
-- **System tray**: Uses `pystray` with platform-specific backends (AppIndicator on Linux, native on macOS/Windows). Optional — gracefully disabled if unavailable.
+- **System tray**: Uses `QSystemTrayIcon` (built into PyQt6). Optional — gracefully disabled if unavailable.
 
 ## Frozen Build Checklist
 
 **When adding new features or dependencies, always verify they work in PyInstaller frozen builds on all three platforms.** Specifically:
 
-1. **New imports**: If a library uses dynamic/conditional imports (like `pystray`'s backend selection), PyInstaller can't trace them automatically. Add explicit hidden imports to the platform-specific sections in `gc_controller_enabler.spec`.
+1. **New imports**: If a library uses dynamic/conditional imports, PyInstaller can't trace them automatically. Add explicit hidden imports to the platform-specific sections in `gc_controller_enabler.spec`.
 2. **New data/asset files**: Any runtime-loaded files (images, fonts, configs) must be added to the `datas` list in the spec file AND loaded via `getattr(sys, '_MEIPASS', os.path.dirname(__file__))` in code.
 3. **New pip dependencies**: Add to `pyproject.toml` with platform markers where appropriate (e.g., `; sys_platform == 'win32'`).
 4. **System-only packages** (not pip-installable, e.g., `gi`/PyGObject on Linux): Use `collect_all()` wrapped in try/except in the spec file, and ensure the feature degrades gracefully at runtime if the package is missing.
@@ -101,9 +101,8 @@ GUI (customtkinter) → App Orchestrator (app.py)
 
 ## Dependencies
 
-Core: `hidapi`, `pyusb`, `customtkinter`, `Pillow`
-Tray: `pystray` (all platforms), `pyobjc-framework-Cocoa` (macOS), `python3-gi` + `gir1.2-appindicator3-0.1` (Linux, system packages)
-Platform: `vgamepad` (Windows), `evdev` + `bumble` (Linux), `bleak` (macOS/Windows)
+Core: `hidapi`, `pyusb`, `PyQt6`
+Platform: `vgamepad` (Windows), `evdev` + `bumble` (Linux), `bleak` (macOS/Windows), `pyobjc-framework-Cocoa` (macOS)
 Build: `pyinstaller`
 
 ## License

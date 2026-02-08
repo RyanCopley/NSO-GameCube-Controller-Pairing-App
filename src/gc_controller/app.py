@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NSO GameCube Controller Pairing App - Python/Tkinter Version
+NSO GameCube Controller Pairing App - Python/PyQt6 Version
 
 Converts GameCube controllers to work with Steam and other applications.
 Handles USB initialization, HID communication, and Xbox 360 controller emulation.
@@ -45,14 +45,6 @@ from .input_processor import InputProcessor
 from .controller_slot import ControllerSlot, normalize_ble_address
 from .ble.sw2_protocol import build_rumble_packet
 
-# System tray support (optional)
-try:
-    import pystray
-    from PIL import Image as PILImage
-    _TRAY_AVAILABLE = True
-except ImportError:
-    _TRAY_AVAILABLE = False
-
 # BLE support (optional — only available on Linux with bumble)
 try:
     from .ble import is_ble_available
@@ -72,25 +64,88 @@ if sys.platform in ('darwin', 'linux'):
             print(f"Note: Could not create Dolphin pipe {_pipe_idx + 1}: {e}")
 
 
+class _ThreadBridge:
+    """Bridges background threads to the Qt event loop using signals.
+
+    All thread→UI communication goes through this class.
+    """
+
+    def __init__(self):
+        from PyQt6.QtCore import QObject, pyqtSignal
+
+        class _Signals(QObject):
+            status_signal = pyqtSignal(int, str)
+            ui_update_signal = pyqtSignal(int, float, float, float, float,
+                                          int, int, object, bool)
+            error_signal = pyqtSignal(int, str)
+            disconnect_signal = pyqtSignal(int)
+            ble_event_signal = pyqtSignal(object)
+            pipe_connected_signal = pyqtSignal(int)
+            pipe_failed_signal = pyqtSignal(int, object)
+
+        self.signals = _Signals()
+
+    # Convenience accessors
+    @property
+    def status(self):
+        return self.signals.status_signal
+
+    @property
+    def ui_update(self):
+        return self.signals.ui_update_signal
+
+    @property
+    def error(self):
+        return self.signals.error_signal
+
+    @property
+    def disconnect(self):
+        return self.signals.disconnect_signal
+
+    @property
+    def ble_event(self):
+        return self.signals.ble_event_signal
+
+    @property
+    def pipe_connected(self):
+        return self.signals.pipe_connected_signal
+
+    @property
+    def pipe_failed(self):
+        return self.signals.pipe_failed_signal
+
+
 class GCControllerEnabler:
     """Main application orchestrator for NSO GameCube Controller Pairing App"""
 
     def __init__(self):
-        import tkinter as tk
-        from tkinter import messagebox
-        import customtkinter
+        from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox
+        from PyQt6.QtCore import QTimer
+        from PyQt6.QtGui import QIcon
         from .controller_ui import ControllerUI
         from .ui_theme import apply_gc_theme
 
-        self._tk = tk
-        self._messagebox = messagebox
+        self._QMessageBox = QMessageBox
+        self._QTimer = QTimer
 
-        apply_gc_theme()
-        self.root = customtkinter.CTk(className='nso-gc-controller')
-        self.root.title("NSO GameCube Controller Pairing App")
-        self.root.configure(fg_color="#535486")
-        self.root.minsize(720, 540)
+        # Create QApplication if it doesn't exist
+        self._app = QApplication.instance() or QApplication(sys.argv)
+        apply_gc_theme(self._app)
+
+        self.root = QMainWindow()
+        self.root.setWindowTitle("NSO GameCube Controller Pairing App")
+        self.root.setMinimumSize(720, 540)
         self._set_window_icon()
+
+        # Thread bridge for cross-thread communication
+        self._bridge = _ThreadBridge()
+        self._bridge.status.connect(self._on_status_signal)
+        self._bridge.ui_update.connect(self._apply_ui_update)
+        self._bridge.error.connect(self._on_error_signal)
+        self._bridge.disconnect.connect(self._on_unexpected_disconnect)
+        self._bridge.ble_event.connect(self._handle_ble_event)
+        self._bridge.pipe_connected.connect(self._on_pipe_connected)
+        self._bridge.pipe_failed.connect(self._on_pipe_failed)
 
         # Per-slot calibration dicts
         self.slot_calibrations = [dict(DEFAULT_CALIBRATION) for _ in range(MAX_SLOTS)]
@@ -105,13 +160,11 @@ class GCControllerEnabler:
             slot = ControllerSlot(
                 index=i,
                 calibration=self.slot_calibrations[i],
-                on_status=lambda msg, idx=i: self._schedule_status(idx, msg),
-                on_progress=lambda val, idx=i: self._schedule_progress(idx, val),
-                on_ui_update=lambda *args, idx=i: self._schedule_ui_update(idx, *args),
-                on_error=lambda msg, idx=i: self.root.after(
-                    0, lambda m=msg: self.ui.update_status(idx, m)),
-                on_disconnect=lambda idx=i: self.root.after(
-                    0, lambda: self._on_unexpected_disconnect(idx)),
+                on_status=lambda msg, idx=i: self._bridge.status.emit(idx, msg),
+                on_progress=lambda val, idx=i: None,
+                on_ui_update=lambda *args, idx=i: self._bridge.ui_update.emit(idx, *args),
+                on_error=lambda msg, idx=i: self._bridge.error.emit(idx, msg),
+                on_disconnect=lambda idx=i: self._bridge.disconnect.emit(idx),
             )
             self.slots.append(slot)
 
@@ -143,22 +196,21 @@ class GCControllerEnabler:
         for i in range(MAX_SLOTS):
             self.ui.draw_trigger_markers(i)
 
-        # Handle window closing
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-        # System tray support
+        # System tray support (QSystemTrayIcon — no extra deps)
         self._tray_icon = None
-        if _TRAY_AVAILABLE:
-            self._init_tray_icon()
-            # Intercept minimize to go to tray when enabled
-            self.root.bind('<Unmap>', self._on_window_unmap)
-            # Re-apply tray state when setting changes
-            self.ui.minimize_to_tray_var.trace_add(
-                'write', lambda *_: self._on_tray_setting_changed())
+        self._init_tray_icon()
 
         # Auto-connect if enabled
         if self.slot_calibrations[0]['auto_connect']:
-            self.root.after(100, self.auto_connect_and_emulate)
+            QTimer.singleShot(100, self.auto_connect_and_emulate)
+
+    # ── Signal handlers ──────────────────────────────────────────────
+
+    def _on_status_signal(self, slot_index: int, message: str):
+        self.ui.update_status(slot_index, message)
+
+    def _on_error_signal(self, slot_index: int, message: str):
+        self.ui.update_status(slot_index, message)
 
     # ── Connection ───────────────────────────────────────────────────
 
@@ -207,9 +259,9 @@ class GCControllerEnabler:
 
         slot.input_proc.start()
 
-        sui.connect_btn.configure(text="Disconnect USB")
+        sui.connect_btn.setText("Disconnect USB")
         if sui.pair_btn:
-            sui.pair_btn.configure(state='disabled')
+            sui.pair_btn.setEnabled(False)
         self.ui.update_tab_status(slot_index, connected=True, emulating=False)
         self.toggle_emulation(slot_index)
 
@@ -246,9 +298,9 @@ class GCControllerEnabler:
         slot.conn_mgr.disconnect()
         slot.device_path = None
 
-        sui.connect_btn.configure(text="Connect USB")
+        sui.connect_btn.setText("Connect USB")
         if sui.pair_btn:
-            sui.pair_btn.configure(state='normal')
+            sui.pair_btn.setEnabled(True)
         self.ui.update_status(slot_index, "Disconnected")
         self.ui.reset_slot_ui(slot_index)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
@@ -367,14 +419,13 @@ class GCControllerEnabler:
                         self.slots[si].ble_data_queue.put(data)
                     continue
 
-                # Other runtime events: dispatch to main (Tkinter) thread
-                self.root.after(
-                    0, lambda ev=event: self._handle_ble_event(ev))
+                # Other runtime events: dispatch to main thread via signal
+                self._bridge.ble_event.emit(event)
         except Exception:
             pass
 
     def _handle_ble_event(self, event):
-        """Handle a BLE runtime event on the main (Tkinter) thread."""
+        """Handle a BLE runtime event on the main thread."""
         etype = event.get('e')
         si = event.get('s')
 
@@ -395,7 +446,7 @@ class GCControllerEnabler:
             if mode == 'pair':
                 self._on_pair_complete(si, None, error=msg)
             else:
-                self.root.after(
+                self._QTimer.singleShot(
                     3000, lambda _si=si: self._attempt_ble_reconnect(_si))
 
         elif etype == 'devices_found' and si is not None:
@@ -405,24 +456,19 @@ class GCControllerEnabler:
             self._on_ble_disconnect(si)
 
         elif etype == 'error':
-            self._messagebox.showerror(
-                "BLE Error", event.get('msg', 'Unknown error'))
+            self._QMessageBox.critical(
+                self.root, "BLE Error", event.get('msg', 'Unknown error'))
 
     # ── BLE ───────────────────────────────────────────────────────────
 
     def _init_ble(self) -> bool:
-        """Lazy-initialize BLE subsystem on first pair attempt.
-
-        On Linux, spawns a privileged subprocess via pkexec (raw HCI access
-        requires elevated privileges). On macOS, spawns a regular subprocess
-        using Bleak/CoreBluetooth (no elevated privileges needed).
-        Returns True on success.
-        """
+        """Lazy-initialize BLE subsystem on first pair attempt."""
         if self._ble_initialized:
             return True
 
         if sys.platform == 'linux' and not shutil.which('pkexec'):
-            self._messagebox.showerror(
+            self._QMessageBox.critical(
+                self.root,
                 "BLE Error",
                 "pkexec is required for Bluetooth LE.\n\n"
                 "Install with:\n"
@@ -432,15 +478,16 @@ class GCControllerEnabler:
         try:
             self._start_ble_subprocess()
         except Exception as e:
-            self._messagebox.showerror(
-                "BLE Error", f"Failed to start BLE service:\n{e}")
+            self._QMessageBox.critical(
+                self.root, "BLE Error", f"Failed to start BLE service:\n{e}")
             return False
 
         # Wait for subprocess to start (user authenticates via pkexec on Linux)
         result = self._wait_ble_init(timeout=60)
         if not result or result.get('e') != 'ready':
             self._cleanup_ble()
-            self._messagebox.showerror(
+            self._QMessageBox.critical(
+                self.root,
                 "BLE Error",
                 "BLE service failed to start.\n\n"
                 "Authentication may have been cancelled.")
@@ -459,7 +506,8 @@ class GCControllerEnabler:
         if not result or result.get('e') == 'error':
             msg = result.get('msg', 'Unknown error') if result else 'Timeout'
             self._cleanup_ble()
-            self._messagebox.showerror(
+            self._QMessageBox.critical(
+                self.root,
                 "BLE Error",
                 f"Failed to initialize BLE:\n{msg}\n\n"
                 "Make sure a Bluetooth adapter is connected.")
@@ -469,12 +517,7 @@ class GCControllerEnabler:
         return True
 
     def pair_controller(self, slot_index: int):
-        """Start BLE pairing for a controller slot.
-
-        Two flows:
-        - Saved address exists: send scan_connect (scan-first with early stop)
-        - No saved address: send scan_devices, show picker, then connect_device
-        """
+        """Start BLE pairing for a controller slot."""
         slot = self.slots[slot_index]
         sui = self.ui.slots[slot_index]
 
@@ -493,7 +536,7 @@ class GCControllerEnabler:
 
         # Disable pair button during pairing
         if sui.pair_btn:
-            sui.pair_btn.configure(state='disabled')
+            sui.pair_btn.setEnabled(False)
         self.ui.update_ble_status(slot_index, "Initializing...")
 
         # Drain any stale data from the queue
@@ -514,9 +557,6 @@ class GCControllerEnabler:
                 and _mac_re.match(target_addr)):
             target_addr = None
 
-        # Always use scan_connect: with a target address it stops as soon
-        # as the device is found; without one it scans briefly then tries
-        # each Nintendo-like device via handshake (auto-identify).
         self._ble_pair_mode[slot_index] = 'pair'
         self._send_ble_cmd({
             "cmd": "scan_connect",
@@ -533,7 +573,7 @@ class GCControllerEnabler:
         if not devices:
             self.ui.update_ble_status(slot_index, "No devices found")
             if sui.pair_btn:
-                sui.pair_btn.configure(state='normal')
+                sui.pair_btn.setEnabled(True)
             return
 
         picker = BLEDevicePickerDialog(self.root, devices)
@@ -543,7 +583,7 @@ class GCControllerEnabler:
             # User cancelled
             self.ui.update_ble_status(slot_index, "Pairing cancelled")
             if sui.pair_btn:
-                sui.pair_btn.configure(state='normal')
+                sui.pair_btn.setEnabled(True)
             return
 
         # Send connect_device with the chosen address
@@ -577,18 +617,18 @@ class GCControllerEnabler:
             slot.input_proc.start(mode='ble')
 
             if sui.pair_btn:
-                sui.pair_btn.configure(text="Disconnect", state='normal')
-            sui.connect_btn.configure(state='disabled')
+                sui.pair_btn.setText("Disconnect")
+                sui.pair_btn.setEnabled(True)
+            sui.connect_btn.setEnabled(False)
             self.ui.update_ble_status(slot_index, f"Connected: {mac}")
             self.ui.update_status(slot_index, "Connected via BLE")
             self.ui.update_tab_status(slot_index, connected=True, emulating=False)
             self.toggle_emulation(slot_index)
         else:
             if sui.pair_btn:
-                sui.pair_btn.configure(state='normal')
+                sui.pair_btn.setEnabled(True)
             if error:
                 self.ui.update_ble_status(slot_index, f"Error: {error}")
-            # Status was already set by on_status callback
 
     def _disconnect_ble(self, slot_index: int):
         """Disconnect BLE on a specific slot."""
@@ -616,8 +656,9 @@ class GCControllerEnabler:
         slot.ble_connected = False
 
         if sui.pair_btn:
-            sui.pair_btn.configure(text="Pair Controller", state='normal')
-        sui.connect_btn.configure(state='normal')
+            sui.pair_btn.setText("Pair Controller")
+            sui.pair_btn.setEnabled(True)
+        sui.connect_btn.setEnabled(True)
         self.ui.update_status(slot_index, "Disconnected")
         self.ui.reset_slot_ui(slot_index)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
@@ -639,7 +680,7 @@ class GCControllerEnabler:
         self.ui.update_status(slot_index, "BLE disconnected — reconnecting...")
         self.ui.update_ble_status(slot_index, "Reconnecting...")
         if sui.pair_btn:
-            sui.pair_btn.configure(state='disabled')
+            sui.pair_btn.setEnabled(False)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
         self._attempt_ble_reconnect(slot_index)
@@ -654,14 +695,15 @@ class GCControllerEnabler:
             self.ui.update_ble_status(slot_index, "")
             self.ui.reset_slot_ui(slot_index)
             if self.ui.slots[slot_index].pair_btn:
-                self.ui.slots[slot_index].pair_btn.configure(
-                    text="Pair Controller", state='normal')
-            self.ui.slots[slot_index].connect_btn.configure(state='normal')
+                self.ui.slots[slot_index].pair_btn.setText("Pair Controller")
+                self.ui.slots[slot_index].pair_btn.setEnabled(True)
+            self.ui.slots[slot_index].connect_btn.setEnabled(True)
             self.ui.update_tab_status(slot_index, connected=False, emulating=False)
             return
 
         if not self._ble_initialized or not self._ble_subprocess:
-            self.root.after(3000, lambda: self._attempt_ble_reconnect(slot_index))
+            self._QTimer.singleShot(
+                3000, lambda: self._attempt_ble_reconnect(slot_index))
             return
 
         # Drain stale data
@@ -684,7 +726,8 @@ class GCControllerEnabler:
         """Handle successful BLE reconnection."""
         slot = self.slots[slot_index]
         if not mac:
-            self.root.after(3000, lambda: self._attempt_ble_reconnect(slot_index))
+            self._QTimer.singleShot(
+                3000, lambda: self._attempt_ble_reconnect(slot_index))
             return
 
         slot.ble_connected = True
@@ -693,8 +736,9 @@ class GCControllerEnabler:
 
         sui = self.ui.slots[slot_index]
         if sui.pair_btn:
-            sui.pair_btn.configure(text="Disconnect", state='normal')
-        sui.connect_btn.configure(state='disabled')
+            sui.pair_btn.setText("Disconnect")
+            sui.pair_btn.setEnabled(True)
+        sui.connect_btn.setEnabled(False)
         self.ui.update_status(slot_index, "Reconnected via BLE")
         self.ui.update_ble_status(slot_index, f"Connected: {mac}")
         self.ui.update_tab_status(slot_index, connected=True, emulating=False)
@@ -704,11 +748,7 @@ class GCControllerEnabler:
             self.toggle_emulation(slot_index)
 
     def auto_connect_and_emulate(self):
-        """Auto-connect all available controllers and start emulation.
-
-        Respects preferred_device_path settings: if slot N has a saved preference
-        and that device is available, it gets that device.
-        """
+        """Auto-connect all available controllers and start emulation."""
         all_hid = ConnectionManager.enumerate_devices()
         if not all_hid:
             return
@@ -738,9 +778,9 @@ class GCControllerEnabler:
                     claimed_paths.add(pref_bytes)
                     slot.device_path = pref_bytes
                     slot.input_proc.start()
-                    sui.connect_btn.configure(text="Disconnect USB")
+                    sui.connect_btn.setText("Disconnect USB")
                     if sui.pair_btn:
-                        sui.pair_btn.configure(state='disabled')
+                        sui.pair_btn.setEnabled(False)
                     self.ui.update_tab_status(i, connected=True, emulating=False)
                     self.toggle_emulation(i)
 
@@ -764,9 +804,9 @@ class GCControllerEnabler:
                 claimed_paths.add(path)
                 slot.device_path = path
                 slot.input_proc.start()
-                sui.connect_btn.configure(text="Disconnect USB")
+                sui.connect_btn.setText("Disconnect USB")
                 if sui.pair_btn:
-                    sui.pair_btn.configure(state='disabled')
+                    sui.pair_btn.setEnabled(False)
                 self.ui.update_tab_status(i, connected=True, emulating=False)
                 self.toggle_emulation(i)
 
@@ -790,9 +830,9 @@ class GCControllerEnabler:
             slot.emu_mgr.stop()
 
         self.ui.update_status(slot_index, "Controller disconnected — reconnecting...")
-        sui.connect_btn.configure(text="Connect USB")
+        sui.connect_btn.setText("Connect USB")
         if sui.pair_btn:
-            sui.pair_btn.configure(state='normal')
+            sui.pair_btn.setEnabled(True)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
         self._attempt_reconnect(slot_index)
@@ -849,9 +889,9 @@ class GCControllerEnabler:
             if slot.conn_mgr.init_hid_device(device_path=target_path):
                 slot.device_path = target_path
                 slot.input_proc.start()
-                sui.connect_btn.configure(text="Disconnect USB")
+                sui.connect_btn.setText("Disconnect USB")
                 if sui.pair_btn:
-                    sui.pair_btn.configure(state='disabled')
+                    sui.pair_btn.setEnabled(False)
                 self.ui.update_status(slot_index, "Reconnected")
                 self.ui.update_tab_status(slot_index, connected=True, emulating=False)
 
@@ -862,7 +902,8 @@ class GCControllerEnabler:
 
         # Failed — retry after a delay
         self.ui.update_status(slot_index, "Controller disconnected — reconnecting...")
-        self.root.after(2000, lambda: self._attempt_reconnect(slot_index))
+        self._QTimer.singleShot(
+            2000, lambda: self._attempt_reconnect(slot_index))
 
     # ── Emulation ────────────────────────────────────────────────────
 
@@ -889,8 +930,8 @@ class GCControllerEnabler:
         try:
             self._toggle_emulation_inner(slot_index)
         except Exception as e:
-            self._messagebox.showerror(
-                "Emulation Error", f"Unexpected error: {e}")
+            self._QMessageBox.critical(
+                self.root, "Emulation Error", f"Unexpected error: {e}")
 
     def _toggle_emulation_inner(self, slot_index: int):
         """Inner implementation of toggle_emulation."""
@@ -906,10 +947,11 @@ class GCControllerEnabler:
             self.ui.update_emu_status(slot_index, "")
             self.ui.update_tab_status(slot_index, connected=slot.is_connected, emulating=False)
         else:
-            mode = self.ui.emu_mode_var.get()
+            mode = self.ui.emu_mode
 
             if not is_emulation_available(mode):
-                self._messagebox.showerror(
+                self._QMessageBox.critical(
+                    self.root,
                     "Error",
                     f"Emulation not available for mode '{mode}'.\n"
                     + get_emulation_unavailable_reason(mode))
@@ -950,7 +992,7 @@ class GCControllerEnabler:
         if not (slot.ble_connected or slot.conn_mgr.device):
             return
 
-        # Send rumble ON (update state so dedup in game callback stays in sync)
+        # Send rumble ON
         slot.rumble_state = True
         packet_on = build_rumble_packet(True, slot.rumble_tid)
         slot.rumble_tid = (slot.rumble_tid + 1) & 0x0F
@@ -979,7 +1021,7 @@ class GCControllerEnabler:
             elif slot.conn_mgr.device:
                 slot.conn_mgr.send_rumble(False)
 
-        self.root.after(500, _stop_rumble)
+        self._QTimer.singleShot(500, _stop_rumble)
 
     def _start_xbox360_emulation(self, slot_index: int):
         """Start Xbox 360 emulation synchronously."""
@@ -990,14 +1032,12 @@ class GCControllerEnabler:
             self.ui.update_emu_status(slot_index, "Connected & Ready")
             self.ui.update_tab_status(slot_index, connected=True, emulating=True)
         except Exception as e:
-            self._messagebox.showerror("Emulation Error",
-                                       f"Failed to start emulation: {e}")
+            self._QMessageBox.critical(
+                self.root, "Emulation Error",
+                f"Failed to start emulation: {e}")
 
     def _start_dolphin_pipe_emulation(self, slot_index: int):
-        """Start Dolphin pipe emulation on a background thread.
-
-        Polls until Dolphin opens the read end of the pipe.
-        """
+        """Start Dolphin pipe emulation on a background thread."""
         slot = self.slots[slot_index]
         pipe_name = f'gc_controller_{slot_index + 1}'
 
@@ -1010,9 +1050,9 @@ class GCControllerEnabler:
             try:
                 slot.emu_mgr.start('dolphin_pipe', slot_index=slot_index,
                                    cancel_event=cancel)
-                self.root.after(0, lambda: self._on_pipe_connected(slot_index))
+                self._bridge.pipe_connected.emit(slot_index)
             except Exception as e:
-                self.root.after(0, lambda: self._on_pipe_failed(slot_index, e))
+                self._bridge.pipe_failed.emit(slot_index, e)
 
         threading.Thread(target=_connect, daemon=True).start()
 
@@ -1024,7 +1064,7 @@ class GCControllerEnabler:
             slot_index, "Connected & Ready")
         self.ui.update_tab_status(slot_index, connected=True, emulating=True)
 
-    def _on_pipe_failed(self, slot_index: int, error: Exception):
+    def _on_pipe_failed(self, slot_index: int, error):
         """Called on the main thread when dolphin pipe open fails or is cancelled."""
         slot = self.slots[slot_index]
         slot._pipe_cancel = None
@@ -1032,8 +1072,9 @@ class GCControllerEnabler:
         self.ui.update_emu_status(slot_index, "")
         self.ui.update_tab_status(slot_index, connected=slot.is_connected, emulating=False)
         if getattr(error, 'errno', None) != errno.ECANCELED:
-            self._messagebox.showerror("Emulation Error",
-                                       f"Failed to start pipe emulation: {error}")
+            self._QMessageBox.critical(
+                self.root, "Emulation Error",
+                f"Failed to start pipe emulation: {error}")
 
     # ── Stick calibration ────────────────────────────────────────────
 
@@ -1045,14 +1086,14 @@ class GCControllerEnabler:
         if slot.cal_mgr.stick_calibrating:
             slot.cal_mgr.finish_stick_calibration()
             self.ui.set_calibration_mode(slot_index, False)
-            sui.stick_cal_btn.configure(text="Calibrate Sticks")
-            sui.stick_cal_status.configure(text="Calibration complete!")
+            sui.stick_cal_btn.setText("Calibrate Sticks")
+            sui.stick_cal_status.setText("Calibration complete!")
             self.ui.mark_slot_dirty(slot_index)
         else:
             self.ui.set_calibration_mode(slot_index, True)
             slot.cal_mgr.start_stick_calibration()
-            sui.stick_cal_btn.configure(text="Finish Calibration")
-            sui.stick_cal_status.configure(text="Move sticks to all extremes...")
+            sui.stick_cal_btn.setText("Finish Calibration")
+            sui.stick_cal_status.setText("Move sticks to all extremes...")
 
     # ── Trigger calibration ──────────────────────────────────────────
 
@@ -1064,7 +1105,7 @@ class GCControllerEnabler:
         result = slot.cal_mgr.trigger_cal_next_step()
         if result is not None:
             step, btn_text, status_text = result
-            sui.trigger_cal_btn.configure(text=btn_text)
+            sui.trigger_cal_btn.setText(btn_text)
             self.ui.update_status(slot_index, status_text)
             if step == 0:
                 # Wizard finished — redraw markers
@@ -1076,15 +1117,15 @@ class GCControllerEnabler:
     def update_calibration_from_ui(self):
         """Update calibration values from UI variables for all slots."""
         # Global settings stored in slot 0's calibration
-        self.slot_calibrations[0]['auto_connect'] = self.ui.auto_connect_var.get()
-        self.slot_calibrations[0]['emulation_mode'] = self.ui.emu_mode_var.get()
-        self.slot_calibrations[0]['trigger_bump_100_percent'] = self.ui.trigger_mode_var.get()
-        self.slot_calibrations[0]['minimize_to_tray'] = self.ui.minimize_to_tray_var.get()
+        self.slot_calibrations[0]['auto_connect'] = self.ui.auto_connect
+        self.slot_calibrations[0]['emulation_mode'] = self.ui.emu_mode
+        self.slot_calibrations[0]['trigger_bump_100_percent'] = self.ui.trigger_bump_100
+        self.slot_calibrations[0]['minimize_to_tray'] = self.ui.minimize_to_tray
 
         for i in range(MAX_SLOTS):
             cal = self.slot_calibrations[i]
-            cal['trigger_bump_100_percent'] = self.ui.trigger_mode_var.get()
-            cal['emulation_mode'] = self.ui.emu_mode_var.get()
+            cal['trigger_bump_100_percent'] = self.ui.trigger_bump_100
+            cal['emulation_mode'] = self.ui.emu_mode
             self.slots[i].cal_mgr.refresh_cache()
 
             # Save BLE state
@@ -1099,28 +1140,13 @@ class GCControllerEnabler:
         try:
             self.settings_mgr.save()
             self.ui.mark_all_clean()
-            self._messagebox.showinfo("Settings", "Settings saved successfully!")
+            self._QMessageBox.information(
+                self.root, "Settings", "Settings saved successfully!")
         except Exception as e:
-            self._messagebox.showerror("Error", f"Failed to save settings: {e}")
+            self._QMessageBox.critical(
+                self.root, "Error", f"Failed to save settings: {e}")
 
     # ── Thread-safe bridges ──────────────────────────────────────────
-
-    def _schedule_status(self, slot_index: int, message: str):
-        """Thread-safe status update via root.after."""
-        self.root.after(0, lambda: self.ui.update_status(slot_index, message))
-
-    def _schedule_progress(self, slot_index: int, value: int):
-        """No-op — progress bar replaced by log text area."""
-        pass
-
-    def _schedule_ui_update(self, slot_index: int, left_x, left_y, right_x, right_y,
-                            left_trigger, right_trigger, button_states,
-                            stick_calibrating):
-        """Schedule a UI update from the input thread for a specific slot."""
-        self.root.after(0, lambda: self._apply_ui_update(
-            slot_index, left_x, left_y, right_x, right_y,
-            left_trigger, right_trigger, button_states,
-            stick_calibrating))
 
     def _apply_ui_update(self, slot_index: int, left_x, left_y, right_x, right_y,
                          left_trigger, right_trigger, button_states,
@@ -1142,98 +1168,104 @@ class GCControllerEnabler:
     # ── System tray ──────────────────────────────────────────────────
 
     def _init_tray_icon(self):
-        """Create the system tray icon (hidden initially)."""
+        """Create the system tray icon using QSystemTrayIcon."""
+        from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
+        from PyQt6.QtGui import QColor, QIcon, QPixmap, QImage
+
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+
         base = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
         png_path = os.path.join(base, "controller.png")
 
-        try:
-            image = PILImage.open(png_path)
-        except Exception:
+        if os.path.exists(png_path):
+            icon = QIcon(png_path)
+        else:
             # Fallback: create a simple colored icon
-            image = PILImage.new('RGB', (64, 64), color=(83, 84, 134))
+            img = QImage(64, 64, QImage.Format.Format_RGB32)
+            img.fill(QColor(83, 84, 134))
+            icon = QIcon(QPixmap.fromImage(img))
 
-        menu = pystray.Menu(
-            pystray.MenuItem("Show", self._tray_show, default=True),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Quit", self._tray_quit),
-        )
+        self._tray_icon = QSystemTrayIcon(icon, self.root)
 
-        self._tray_icon = pystray.Icon(
-            "nso-gc-controller",
-            image,
-            "NSO GC Controller",
-            menu,
-        )
-        # Run tray icon in a daemon thread so it doesn't block Tkinter
-        tray_thread = threading.Thread(target=self._tray_icon.run, daemon=True)
-        tray_thread.start()
-        # Start hidden — only visible when minimize-to-tray is active
-        self._tray_icon.visible = False
+        menu = QMenu()
+        show_action = menu.addAction("Show")
+        show_action.triggered.connect(self._tray_show)
+        menu.addSeparator()
+        quit_action = menu.addAction("Quit")
+        quit_action.triggered.connect(self._tray_quit)
 
-    def _on_tray_setting_changed(self):
-        """Called when the minimize_to_tray setting is toggled."""
-        if not self.ui.minimize_to_tray_var.get() and self._tray_icon:
-            # Setting was disabled — make sure tray icon is hidden
-            self._tray_icon.visible = False
+        self._tray_icon.setContextMenu(menu)
+        self._tray_icon.setToolTip("NSO GC Controller")
 
-    def _on_window_unmap(self, event):
-        """Handle window minimize — go to tray if enabled."""
-        if (event.widget == self.root
-                and self.ui.minimize_to_tray_var.get()
-                and self._tray_icon):
-            # Check if the window was actually iconified (minimized)
-            self.root.after(50, self._check_iconified)
+        # Double-click to restore
+        self._tray_icon.activated.connect(self._on_tray_activated)
 
-    def _check_iconified(self):
-        """Check if the window is iconified and hide to tray."""
-        try:
-            if self.root.state() == 'iconic':
-                self._hide_to_tray()
-        except Exception:
-            pass
+    def _on_tray_activated(self, reason):
+        from PyQt6.QtWidgets import QSystemTrayIcon
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._tray_show()
 
-    def _hide_to_tray(self):
-        """Withdraw the window and show the tray icon."""
-        self.root.withdraw()
-        if self._tray_icon:
-            self._tray_icon.visible = True
-
-    def _tray_show(self, icon=None, item=None):
+    def _tray_show(self):
         """Restore the window from the tray."""
         if self._tray_icon:
-            self._tray_icon.visible = False
-        # Schedule on the Tkinter main thread
-        self.root.after(0, self._restore_window)
+            self._tray_icon.hide()
+        self.root.showNormal()
+        self.root.activateWindow()
+        self.root.raise_()
 
-    def _restore_window(self):
-        """Restore and focus the main window."""
-        self.root.deiconify()
-        self.root.lift()
-        self.root.focus_force()
-
-    def _tray_quit(self, icon=None, item=None):
+    def _tray_quit(self):
         """Quit the application from the tray menu."""
         if self._tray_icon:
-            self._tray_icon.visible = False
-        # Schedule actual closing on the Tkinter main thread
-        self.root.after(0, self._actual_quit)
+            self._tray_icon.hide()
+        self._actual_quit()
+
+    def _hide_to_tray(self):
+        """Hide the window and show the tray icon."""
+        self.root.hide()
+        if self._tray_icon:
+            self._tray_icon.show()
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
-    def on_closing(self):
-        """Handle application closing — minimize to tray or quit."""
-        if (self.ui.minimize_to_tray_var.get()
-                and _TRAY_AVAILABLE and self._tray_icon):
-            self._hide_to_tray()
-            return
-        self._actual_quit()
+    def _setup_close_event(self):
+        """Override the QMainWindow closeEvent."""
+        original_close = self.root.closeEvent
+
+        def _close_event(event):
+            if (self.ui.minimize_to_tray
+                    and self._tray_icon):
+                event.ignore()
+                self._hide_to_tray()
+            else:
+                event.ignore()
+                self._actual_quit()
+
+        self.root.closeEvent = _close_event
+
+        # Override changeEvent for minimize-to-tray
+        from PyQt6.QtWidgets import QMainWindow
+        _root_ref = self.root
+
+        def _change_event(event):
+            from PyQt6.QtCore import QEvent
+            if (event.type() == QEvent.Type.WindowStateChange
+                    and _root_ref.isMinimized()
+                    and self.ui.minimize_to_tray
+                    and self._tray_icon):
+                event.ignore()
+                self._QTimer.singleShot(0, self._hide_to_tray)
+            else:
+                QMainWindow.changeEvent(_root_ref, event)
+
+        self.root.changeEvent = _change_event
 
     def _actual_quit(self):
-        """Perform full application shutdown and destroy the window."""
+        """Perform full application shutdown."""
         # Stop tray icon
         if self._tray_icon:
             try:
-                self._tray_icon.stop()
+                self._tray_icon.hide()
             except Exception:
                 pass
             self._tray_icon = None
@@ -1254,38 +1286,39 @@ class GCControllerEnabler:
                 pass
             self._cleanup_ble()
 
-        self.root.destroy()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.quit()
 
     def _set_window_icon(self):
         """Set the window/taskbar icon across platforms."""
         try:
             if sys.platform == "win32":
-                # Tell Windows this is its own app, not "python.exe",
-                # so the taskbar shows our icon instead of the default.
                 import ctypes
                 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
                     "nso.gamecube-controller-pairing-app")
 
-            # Locate the .ico / .png for the window icon
+            from PyQt6.QtGui import QIcon
+
             base = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
             ico_path = os.path.join(base, "controller.ico")
             png_path = os.path.join(base, "controller.png")
 
             if sys.platform == "win32" and os.path.exists(ico_path):
-                self.root.iconbitmap(ico_path)
+                self.root.setWindowIcon(QIcon(ico_path))
             elif os.path.exists(png_path):
-                icon = self._tk.PhotoImage(file=png_path)
-                self.root.iconphoto(True, icon)
+                self.root.setWindowIcon(QIcon(png_path))
         except Exception:
             pass
 
     def run(self):
         """Start the application."""
-        self.root.mainloop()
+        self._setup_close_event()
+        self.root.show()
+        self._app.exec()
 
 
 class _BleHeadlessManager:
-    """Manages the BLE subprocess for headless mode (no Tkinter)."""
+    """Manages the BLE subprocess for headless mode (no GUI)."""
 
     def __init__(self):
         self._subprocess = None
@@ -1356,13 +1389,7 @@ class _BleHeadlessManager:
         return None
 
     def init_ble(self, on_data, on_event) -> bool:
-        """Full init sequence: spawn → start reader → wait ready → stop_bluez → open HCI.
-
-        The reader thread must be running before we wait for init events,
-        so on_data and on_event callbacks are required upfront.
-        On macOS, pkexec is not needed (CoreBluetooth works in userspace).
-        Returns True on success, prints errors to stdout.
-        """
+        """Full init sequence: spawn → start reader → wait ready → stop_bluez → open HCI."""
         if self._initialized:
             return True
 
@@ -1410,12 +1437,7 @@ class _BleHeadlessManager:
         return True
 
     def start_reader(self, on_data, on_event):
-        """Start the event reader thread.
-
-        Args:
-            on_data: callback(slot_index, data_bytes) for low-latency data events
-            on_event: callback(event_dict) for runtime events (connected, disconnected, etc.)
-        """
+        """Start the event reader thread."""
         self._reader_thread = threading.Thread(
             target=self._event_reader, args=(on_data, on_event), daemon=True)
         self._reader_thread.start()
