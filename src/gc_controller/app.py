@@ -115,6 +115,10 @@ class GCControllerEnabler:
             )
             self.slots.append(slot)
 
+        # Per-slot pending UI update: stores latest data and after-ID so
+        # rapid updates are coalesced instead of queuing unboundedly.
+        self._pending_ui = [None] * MAX_SLOTS   # after-ID per slot
+
         # BLE state (lazy-initialized on first pair via privileged subprocess)
         self._ble_available = is_ble_available()
         self._ble_subprocess = None
@@ -1116,8 +1120,19 @@ class GCControllerEnabler:
     def _schedule_ui_update(self, slot_index: int, left_x, left_y, right_x, right_y,
                             left_trigger, right_trigger, button_states,
                             stick_calibrating):
-        """Schedule a UI update from the input thread for a specific slot."""
-        self.root.after(0, lambda: self._apply_ui_update(
+        """Schedule a UI update from the input thread for a specific slot.
+
+        Coalesces rapid updates: if a previous update for this slot hasn't
+        been processed yet, cancel it and replace with the latest data.
+        """
+        prev = self._pending_ui[slot_index]
+        if prev is not None:
+            try:
+                self.root.after_cancel(prev)
+            except (ValueError, Exception):
+                pass
+
+        self._pending_ui[slot_index] = self.root.after(0, lambda: self._apply_ui_update(
             slot_index, left_x, left_y, right_x, right_y,
             left_trigger, right_trigger, button_states,
             stick_calibrating))
@@ -1126,6 +1141,7 @@ class GCControllerEnabler:
                          left_trigger, right_trigger, button_states,
                          stick_calibrating):
         """Apply UI updates on the main thread for a specific slot."""
+        self._pending_ui[slot_index] = None
         try:
             self.ui.update_stick_position(slot_index, 'left', left_x, left_y)
             self.ui.update_stick_position(slot_index, 'right', right_x, right_y)

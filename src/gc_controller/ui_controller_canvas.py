@@ -105,6 +105,13 @@ class GCControllerVisual:
 
         self._calibrating = False
 
+        # Dirty-tracking: cache previous state to skip redundant canvas ops
+        self._prev_buttons = {}      # button_name → bool
+        self._prev_lstick = (None, None)
+        self._prev_cstick = (None, None)
+        self._prev_ltrigger = None
+        self._prev_rtrigger = None
+
         self._load_images()
         self._create_canvas_items()
 
@@ -312,36 +319,39 @@ class GCControllerVisual:
     # ── Public API ────────────────────────────────────────────────────
 
     def update_button_states(self, button_states: dict):
-        """Show/hide pressed button overlays.
+        """Show/hide pressed button overlays (only updates changed buttons).
 
         Args:
             button_states: dict mapping button name → bool (pressed).
         """
-        # Reset under-body layers: show normal, hide pressed
-        for btn_name in self._under_normal_items:
-            self.canvas.itemconfigure(
-                self._under_normal_items[btn_name], state='normal')
-            self.canvas.itemconfigure(
-                self._under_pressed_items[btn_name], state='hidden')
+        prev = self._prev_buttons
 
-        # Reset above-body overlays
-        for btn_name, item_id in self._pressed_items.items():
-            self.canvas.itemconfigure(item_id, state='hidden')
-
-        # Apply pressed states
         for name, is_pressed in button_states.items():
-            if not is_pressed:
+            # Skip if unchanged from last frame
+            if prev.get(name) == is_pressed:
                 continue
-            # Under-body buttons: swap normal→hidden, pressed→visible
+
             if name in self._under_normal_items:
-                self.canvas.itemconfigure(
-                    self._under_normal_items[name], state='hidden')
-                self.canvas.itemconfigure(
-                    self._under_pressed_items[name], state='normal')
-            # Above-body buttons: show pressed overlay
+                if is_pressed:
+                    self.canvas.itemconfigure(
+                        self._under_normal_items[name], state='hidden')
+                    self.canvas.itemconfigure(
+                        self._under_pressed_items[name], state='normal')
+                else:
+                    self.canvas.itemconfigure(
+                        self._under_normal_items[name], state='normal')
+                    self.canvas.itemconfigure(
+                        self._under_pressed_items[name], state='hidden')
             elif name in self._pressed_items:
                 self.canvas.itemconfigure(
-                    self._pressed_items[name], state='normal')
+                    self._pressed_items[name],
+                    state='normal' if is_pressed else 'hidden')
+
+        self._prev_buttons = button_states
+
+    # Minimum change in normalized stick value to trigger a canvas update.
+    # 2/4096 ≈ 0.0005 — filters sub-pixel jitter without adding visible lag.
+    _STICK_EPSILON = 0.005
 
     def update_stick_position(self, side: str, x_norm: float, y_norm: float):
         """Move a stick dot and stick image to the given normalized position.
@@ -354,13 +364,24 @@ class GCControllerVisual:
         x_norm = max(-1.0, min(1.0, x_norm))
         y_norm = max(-1.0, min(1.0, y_norm))
 
+        # Skip update if stick hasn't moved enough
         if side == 'left':
+            prev = self._prev_lstick
+        else:
+            prev = self._prev_cstick
+        if (prev[0] is not None
+                and abs(x_norm - prev[0]) < self._STICK_EPSILON
+                and abs(y_norm - prev[1]) < self._STICK_EPSILON):
+            return
+        if side == 'left':
+            self._prev_lstick = (x_norm, y_norm)
             cx, cy = self.LSTICK_CX, self.LSTICK_CY
             r = self.STICK_GATE_RADIUS
             dot_tag = 'lstick_dot'
             img_tag = 'lstick_img'
             img_move = self.STICK_IMG_MOVE
         else:
+            self._prev_cstick = (x_norm, y_norm)
             cx, cy = self.CSTICK_CX, self.CSTICK_CY
             r = self.CSTICK_GATE_RADIUS
             dot_tag = 'cstick_dot'
@@ -388,15 +409,21 @@ class GCControllerVisual:
             side: 'left' or 'right'.
             value_0_255: raw trigger value 0–255.
         """
-        tw = self.TRIGGER_W
-
+        # Skip if unchanged
         if side == 'left':
+            if self._prev_ltrigger == value_0_255:
+                return
+            self._prev_ltrigger = value_0_255
             tag = 'trigger_L_fill'
             bx, by = self.TRIGGER_L_X, self.TRIGGER_L_Y
         else:
+            if self._prev_rtrigger == value_0_255:
+                return
+            self._prev_rtrigger = value_0_255
             tag = 'trigger_R_fill'
             bx, by = self.TRIGGER_R_X, self.TRIGGER_R_Y
 
+        tw = self.TRIGGER_W
         th = self.TRIGGER_H
         fill_w = (value_0_255 / 255.0) * (tw - 4)
         self.canvas.coords(tag,
@@ -516,6 +543,13 @@ class GCControllerVisual:
         # Hide above-body pressed overlays
         for btn_name, item_id in self._pressed_items.items():
             self.canvas.itemconfigure(item_id, state='hidden')
+
+        # Clear dirty-tracking caches so next update applies fully
+        self._prev_buttons = {}
+        self._prev_lstick = (None, None)
+        self._prev_cstick = (None, None)
+        self._prev_ltrigger = None
+        self._prev_rtrigger = None
 
         # Center sticks (moves both dots and stick images)
         for side in ('left', 'right'):
