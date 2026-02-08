@@ -395,6 +395,12 @@ class BleakBackend:
         _report_count = [0]
 
         def _on_input(char: BleakGATTCharacteristic, value: bytearray):
+            # Ignore non-input notifications (e.g. command responses triggered
+            # by rumble writes).  BLE input reports are 63 bytes; command
+            # responses are shorter and would be misinterpreted as joystick
+            # data, corrupting both sticks while rumble is active.
+            if len(value) < 30:
+                return
             if _report_count[0] < 3:
                 _report_count[0] += 1
                 _log(f"  Report #{_report_count[0]}: len={len(value)} first16={list(value[:16])}")
