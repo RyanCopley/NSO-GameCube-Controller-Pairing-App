@@ -410,11 +410,18 @@ class BleakBackend:
             except Exception as e:
                 _log(f"  Failed to subscribe to {char.uuid}: {e}")
 
-        # Send init commands (from nso-gc-bridge approach)
+        # Send init commands (from nso-gc-bridge approach).
+        # SW2 protocol commands (like LED set) must go to the command channel
+        # characteristic (2nd WriteNoResp by handle = 0x0014 equivalent), not
+        # the handshake char.  Using the wrong characteristic causes the
+        # controller to silently ignore the command — this is why player LEDs
+        # didn't light up on macOS/Windows while working on Linux (Bumble
+        # writes directly to handle 0x0014).
+        cmd_char = self._cmd_chars.get(address, handshake_char)
         for data in (_DEFAULT_REPORT_DATA, bytearray(build_led_cmd(
                 LED_MAP[min(slot_index, len(LED_MAP) - 1)]))):
             try:
-                await client.write_gatt_char(handshake_char.uuid, data)
+                await client.write_gatt_char(cmd_char, data, response=False)
             except Exception:
                 pass
 
