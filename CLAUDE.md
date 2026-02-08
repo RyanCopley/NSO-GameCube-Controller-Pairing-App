@@ -86,10 +86,23 @@ GUI (customtkinter) → App Orchestrator (app.py)
 - **BLE state**: Lazy initialization on first pair; subprocess messaging via events/queues
 - **PyInstaller builds**: vgamepad DLL paths need special handling in frozen builds via `sys._MEIPASS`
 - **Entry points**: `--ble-subprocess` and `--bleak-subprocess` flags in `__main__.py` dispatch to BLE subprocess runners instead of the main app
+- **System tray**: Uses `pystray` with platform-specific backends (AppIndicator on Linux, native on macOS/Windows). Optional — gracefully disabled if unavailable.
+
+## Frozen Build Checklist
+
+**When adding new features or dependencies, always verify they work in PyInstaller frozen builds on all three platforms.** Specifically:
+
+1. **New imports**: If a library uses dynamic/conditional imports (like `pystray`'s backend selection), PyInstaller can't trace them automatically. Add explicit hidden imports to the platform-specific sections in `gc_controller_enabler.spec`.
+2. **New data/asset files**: Any runtime-loaded files (images, fonts, configs) must be added to the `datas` list in the spec file AND loaded via `getattr(sys, '_MEIPASS', os.path.dirname(__file__))` in code.
+3. **New pip dependencies**: Add to `pyproject.toml` with platform markers where appropriate (e.g., `; sys_platform == 'win32'`).
+4. **System-only packages** (not pip-installable, e.g., `gi`/PyGObject on Linux): Use `collect_all()` wrapped in try/except in the spec file, and ensure the feature degrades gracefully at runtime if the package is missing.
+5. **New C extensions or DLLs**: Add as `binaries` (not `datas`) in the spec file so PyInstaller resolves transitive dependencies.
+6. **Optional features**: Always wrap imports in try/except with a `_FEATURE_AVAILABLE` flag so the app runs even if bundling is incomplete.
 
 ## Dependencies
 
-Core: `hidapi`, `pyusb`, `customtkinter`
+Core: `hidapi`, `pyusb`, `customtkinter`, `Pillow`
+Tray: `pystray` (all platforms), `pyobjc-framework-Cocoa` (macOS), `python3-gi` + `gir1.2-appindicator3-0.1` (Linux, system packages)
 Platform: `vgamepad` (Windows), `evdev` + `bumble` (Linux), `bleak` (macOS/Windows)
 Build: `pyinstaller`
 

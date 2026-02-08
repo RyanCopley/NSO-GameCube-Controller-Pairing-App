@@ -3,7 +3,8 @@
   "global": {
     "trigger_bump_100_percent": false,
     "emulation_mode": "xbox360",
-    "auto_connect": true
+    "auto_connect": true,
+    "minimize_to_tray": true
   },
   "slots": {
     "0": {

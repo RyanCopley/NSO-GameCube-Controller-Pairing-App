@@ -74,6 +74,7 @@ class ControllerUI:
             emu_default = 'dolphin_pipe'
         self.emu_mode_var = tk.StringVar(value=emu_default)
         self.trigger_mode_var = tk.BooleanVar(value=slot_calibrations[0]['trigger_bump_100_percent'])
+        self.minimize_to_tray_var = tk.BooleanVar(value=slot_calibrations[0].get('minimize_to_tray', False))
 
         # Callbacks for settings dialog
         self._on_emulate_all = on_emulate_all
@@ -167,6 +168,7 @@ class ControllerUI:
         self.auto_connect_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
         self.emu_mode_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
         self.trigger_mode_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
+        self.minimize_to_tray_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
 
     def _build_tab(self, index: int, slot_ui: SlotUI,
                    on_connect, on_stick_cal, on_trigger_cal,
@@ -266,6 +268,7 @@ class ControllerUI:
             emu_mode_var=self.emu_mode_var,
             trigger_mode_var=self.trigger_mode_var,
             auto_connect_var=self.auto_connect_var,
+            minimize_to_tray_var=self.minimize_to_tray_var,
             on_emulate_all=self._on_emulate_all if self._on_emulate_all else lambda: None,
             on_test_rumble_all=self._on_test_rumble_all if self._on_test_rumble_all else lambda: None,
             is_any_emulating=lambda: any(self._slot_emulating),

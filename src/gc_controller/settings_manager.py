@@ -13,7 +13,7 @@ from .controller_constants import DEFAULT_CALIBRATION, MAX_SLOTS
 
 
 # Keys that belong in per-slot settings (everything except global keys)
-_GLOBAL_KEYS = {'auto_connect', 'emulation_mode', 'trigger_bump_100_percent'}
+_GLOBAL_KEYS = {'auto_connect', 'emulation_mode', 'trigger_bump_100_percent', 'minimize_to_tray'}
 
 
 class SettingsManager:

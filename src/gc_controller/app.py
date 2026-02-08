@@ -45,6 +45,14 @@ from .input_processor import InputProcessor
 from .controller_slot import ControllerSlot, normalize_ble_address
 from .ble.sw2_protocol import build_rumble_packet
 
+# System tray support (optional)
+try:
+    import pystray
+    from PIL import Image as PILImage
+    _TRAY_AVAILABLE = True
+except ImportError:
+    _TRAY_AVAILABLE = False
+
 # BLE support (optional — only available on Linux with bumble)
 try:
     from .ble import is_ble_available
@@ -137,6 +145,16 @@ class GCControllerEnabler:
 
         # Handle window closing
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # System tray support
+        self._tray_icon = None
+        if _TRAY_AVAILABLE:
+            self._init_tray_icon()
+            # Intercept minimize to go to tray when enabled
+            self.root.bind('<Unmap>', self._on_window_unmap)
+            # Re-apply tray state when setting changes
+            self.ui.minimize_to_tray_var.trace_add(
+                'write', lambda *_: self._on_tray_setting_changed())
 
         # Auto-connect if enabled
         if self.slot_calibrations[0]['auto_connect']:
@@ -1061,6 +1079,7 @@ class GCControllerEnabler:
         self.slot_calibrations[0]['auto_connect'] = self.ui.auto_connect_var.get()
         self.slot_calibrations[0]['emulation_mode'] = self.ui.emu_mode_var.get()
         self.slot_calibrations[0]['trigger_bump_100_percent'] = self.ui.trigger_mode_var.get()
+        self.slot_calibrations[0]['minimize_to_tray'] = self.ui.minimize_to_tray_var.get()
 
         for i in range(MAX_SLOTS):
             cal = self.slot_calibrations[i]
@@ -1120,10 +1139,105 @@ class GCControllerEnabler:
             import traceback
             traceback.print_exc()
 
+    # ── System tray ──────────────────────────────────────────────────
+
+    def _init_tray_icon(self):
+        """Create the system tray icon (hidden initially)."""
+        base = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
+        png_path = os.path.join(base, "controller.png")
+
+        try:
+            image = PILImage.open(png_path)
+        except Exception:
+            # Fallback: create a simple colored icon
+            image = PILImage.new('RGB', (64, 64), color=(83, 84, 134))
+
+        menu = pystray.Menu(
+            pystray.MenuItem("Show", self._tray_show, default=True),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Quit", self._tray_quit),
+        )
+
+        self._tray_icon = pystray.Icon(
+            "nso-gc-controller",
+            image,
+            "NSO GC Controller",
+            menu,
+        )
+        # Run tray icon in a daemon thread so it doesn't block Tkinter
+        tray_thread = threading.Thread(target=self._tray_icon.run, daemon=True)
+        tray_thread.start()
+        # Start hidden — only visible when minimize-to-tray is active
+        self._tray_icon.visible = False
+
+    def _on_tray_setting_changed(self):
+        """Called when the minimize_to_tray setting is toggled."""
+        if not self.ui.minimize_to_tray_var.get() and self._tray_icon:
+            # Setting was disabled — make sure tray icon is hidden
+            self._tray_icon.visible = False
+
+    def _on_window_unmap(self, event):
+        """Handle window minimize — go to tray if enabled."""
+        if (event.widget == self.root
+                and self.ui.minimize_to_tray_var.get()
+                and self._tray_icon):
+            # Check if the window was actually iconified (minimized)
+            self.root.after(50, self._check_iconified)
+
+    def _check_iconified(self):
+        """Check if the window is iconified and hide to tray."""
+        try:
+            if self.root.state() == 'iconic':
+                self._hide_to_tray()
+        except Exception:
+            pass
+
+    def _hide_to_tray(self):
+        """Withdraw the window and show the tray icon."""
+        self.root.withdraw()
+        if self._tray_icon:
+            self._tray_icon.visible = True
+
+    def _tray_show(self, icon=None, item=None):
+        """Restore the window from the tray."""
+        if self._tray_icon:
+            self._tray_icon.visible = False
+        # Schedule on the Tkinter main thread
+        self.root.after(0, self._restore_window)
+
+    def _restore_window(self):
+        """Restore and focus the main window."""
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def _tray_quit(self, icon=None, item=None):
+        """Quit the application from the tray menu."""
+        if self._tray_icon:
+            self._tray_icon.visible = False
+        # Schedule actual closing on the Tkinter main thread
+        self.root.after(0, self._actual_quit)
+
     # ── Lifecycle ────────────────────────────────────────────────────
 
     def on_closing(self):
-        """Handle application closing."""
+        """Handle application closing — minimize to tray or quit."""
+        if (self.ui.minimize_to_tray_var.get()
+                and _TRAY_AVAILABLE and self._tray_icon):
+            self._hide_to_tray()
+            return
+        self._actual_quit()
+
+    def _actual_quit(self):
+        """Perform full application shutdown and destroy the window."""
+        # Stop tray icon
+        if self._tray_icon:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
+            self._tray_icon = None
+
         for i in range(MAX_SLOTS):
             self._reset_rumble(i)
             slot = self.slots[i]
