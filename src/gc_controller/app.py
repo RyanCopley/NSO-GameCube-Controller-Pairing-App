@@ -159,6 +159,7 @@ class GCControllerEnabler:
             on_forget_ble=(self._clear_known_ble_devices
                           if self._ble_available and sys.platform != 'linux'
                           else None),
+            on_auto_save=self._auto_save,
         )
 
         # Now that UI is built, draw initial trigger markers for all slots
@@ -227,12 +228,9 @@ class GCControllerEnabler:
 
         slot.device_path = target_path
 
-        # Save the path as the preferred device for this slot
+        # Save the path as the preferred device for this slot (runtime only)
         path_str = target_path.decode('utf-8', errors='replace')
-        old_pref = self.slot_calibrations[slot_index].get('preferred_device_path', '')
         self.slot_calibrations[slot_index]['preferred_device_path'] = path_str
-        if path_str != old_pref:
-            self.ui.mark_slot_dirty(slot_index)
 
         slot.input_proc.start()
 
@@ -278,7 +276,7 @@ class GCControllerEnabler:
         sui.connect_btn.configure(text="Connect USB")
         if sui.pair_btn:
             sui.pair_btn.configure(state='normal')
-        self.ui.update_status(slot_index, "Disconnected")
+        self.ui.update_status(slot_index, "Ready to connect")
         self.ui.reset_slot_ui(slot_index)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
@@ -757,7 +755,7 @@ class GCControllerEnabler:
         addr_upper = address.upper()
         if addr_upper not in devices:
             devices[addr_upper] = {}
-            self.ui.mark_slot_dirty(0)
+            self._auto_save()
 
     def _save_device_calibration(self, slot_index: int, mac: str):
         """Copy per-device calibration keys from a slot into the device registry."""
@@ -788,7 +786,7 @@ class GCControllerEnabler:
     def _clear_known_ble_devices(self):
         """Remove all known BLE devices and stop auto-scan."""
         self.slot_calibrations[0]['known_ble_devices'] = {}
-        self.ui.mark_slot_dirty(0)
+        self._auto_save()
         self._stop_auto_scan()
 
     def _try_known_addresses_scan(self, slot_index: int):
@@ -871,6 +869,21 @@ class GCControllerEnabler:
         if self._auto_scan_timer_id is not None:
             self.root.after_cancel(self._auto_scan_timer_id)
             self._auto_scan_timer_id = None
+
+    def _ensure_auto_scan(self, delay_ms: int = 0):
+        """Ensure auto-scan is running. Reschedule the next tick if already active."""
+        if not self._ble_initialized or not self._get_known_ble_addresses():
+            return
+        if self._auto_scan_active:
+            # Cancel existing timer and reschedule sooner
+            if self._auto_scan_timer_id is not None:
+                self.root.after_cancel(self._auto_scan_timer_id)
+            self._auto_scan_timer_id = self.root.after(
+                delay_ms, self._auto_scan_tick)
+        else:
+            self._auto_scan_active = True
+            self._auto_scan_timer_id = self.root.after(
+                delay_ms, self._auto_scan_tick)
 
     def _auto_scan_tick(self):
         """Periodic callback: scan for any known BLE controller.
@@ -1046,21 +1059,21 @@ class GCControllerEnabler:
 
         slot.ble_connected = False
 
+        # Clean up any auto-scan state that targeted this slot
+        if self._auto_scan_slot == slot_index:
+            self._auto_scan_pending = False
+            self._auto_scan_slot = None
+        self._ble_pair_mode.pop(slot_index, None)
+
         if sui.pair_btn:
             sui.pair_btn.configure(text="Pair New Controller", state='normal')
         sui.connect_btn.configure(state='normal')
-        self.ui.update_status(slot_index, "Disconnected")
+        self.ui.update_status(slot_index, "Ready to connect")
         self.ui.reset_slot_ui(slot_index)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
-        # Reschedule auto-scan soon so it can reconnect this controller
-        if self._auto_scan_active:
-            if self._auto_scan_timer_id is not None:
-                self.root.after_cancel(self._auto_scan_timer_id)
-            self._auto_scan_timer_id = self.root.after(
-                3000, self._auto_scan_tick)
-        elif self._ble_initialized and self._get_known_ble_addresses():
-            self._start_auto_scan()
+        # Reschedule auto-scan so it can reconnect this controller
+        self._ensure_auto_scan(delay_ms=3000)
 
     def _on_ble_disconnect(self, slot_index: int):
         """Handle unexpected BLE disconnect."""
@@ -1074,6 +1087,13 @@ class GCControllerEnabler:
             slot.emu_mgr.stop()
 
         slot.ble_connected = False
+
+        # Clean up any auto-scan state that targeted this slot
+        if self._auto_scan_slot == slot_index:
+            self._auto_scan_pending = False
+            self._auto_scan_slot = None
+        self._ble_pair_mode.pop(slot_index, None)
+
         sui = self.ui.slots[slot_index]
 
         self.ui.update_status(slot_index, "BLE disconnected — reconnecting...")
@@ -1085,8 +1105,7 @@ class GCControllerEnabler:
         self._attempt_ble_reconnect(slot_index)
 
         # Ensure auto-scan is running (for reconnecting other known controllers)
-        if not self._auto_scan_active and self._ble_initialized and self._get_known_ble_addresses():
-            self._start_auto_scan()
+        self._ensure_auto_scan()
 
     def _attempt_ble_reconnect(self, slot_index: int):
         """Try to reconnect BLE. Retries every 3 seconds."""
@@ -1094,7 +1113,7 @@ class GCControllerEnabler:
 
         # User clicked disconnect while we were waiting — abort
         if slot.input_proc.stop_event.is_set():
-            self.ui.update_status(slot_index, "Disconnected")
+            self.ui.update_status(slot_index, "Ready to connect")
             self.ui.update_ble_status(slot_index, "")
             self.ui.reset_slot_ui(slot_index)
             if self.ui.slots[slot_index].pair_btn:
@@ -1104,11 +1123,7 @@ class GCControllerEnabler:
             self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
             # Reconnect loop aborted — let auto-scan take over
-            if self._auto_scan_active and not self._auto_scan_pending:
-                if self._auto_scan_timer_id is not None:
-                    self.root.after_cancel(self._auto_scan_timer_id)
-                self._auto_scan_timer_id = self.root.after(
-                    3000, self._auto_scan_tick)
+            self._ensure_auto_scan(delay_ms=3000)
             return
 
         if not self._ble_initialized or not self._ble_subprocess:
@@ -1255,7 +1270,7 @@ class GCControllerEnabler:
 
         # User clicked Disconnect while we were waiting — abort.
         if slot.input_proc.stop_event.is_set():
-            self.ui.update_status(slot_index, "Disconnected")
+            self.ui.update_status(slot_index, "Ready to connect")
             self.ui.reset_slot_ui(slot_index)
             self.ui.update_tab_status(slot_index, connected=False, emulating=False)
             return
@@ -1513,7 +1528,7 @@ class GCControllerEnabler:
             self.ui.set_calibration_mode(slot_index, False)
             sui.stick_cal_btn.configure(text="Calibrate Sticks")
             sui.stick_cal_status.configure(text="Calibration complete!")
-            self.ui.mark_slot_dirty(slot_index)
+            self._auto_save()
         else:
             self.ui.set_calibration_mode(slot_index, True)
             slot.cal_mgr.start_stick_calibration()
@@ -1535,7 +1550,7 @@ class GCControllerEnabler:
             if step == 0:
                 # Wizard finished — redraw markers
                 self.ui.draw_trigger_markers(slot_index)
-                self.ui.mark_slot_dirty(slot_index)
+                self._auto_save()
 
     # ── Settings ─────────────────────────────────────────────────────
 
@@ -1558,12 +1573,19 @@ class GCControllerEnabler:
             if slot.ble_connected and slot.ble_address:
                 self._save_device_calibration(i, slot.ble_address)
 
+    def _auto_save(self):
+        """Silently save settings (no messagebox). Called after calibration/pairing."""
+        self.update_calibration_from_ui()
+        try:
+            self.settings_mgr.save()
+        except Exception as e:
+            print(f"Auto-save failed: {e}")
+
     def save_settings(self):
         """Save calibration settings for all slots to file."""
         self.update_calibration_from_ui()
         try:
             self.settings_mgr.save()
-            self.ui.mark_all_clean()
             self._messagebox.showinfo("Settings", "Settings saved successfully!")
         except Exception as e:
             self._messagebox.showerror("Error", f"Failed to save settings: {e}")

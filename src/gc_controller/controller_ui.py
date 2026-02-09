@@ -58,7 +58,8 @@ class ControllerUI:
                  on_emulate_all: Optional[Callable] = None,
                  on_test_rumble_all: Optional[Callable] = None,
                  ble_available: bool = False,
-                 on_forget_ble: Optional[Callable] = None):
+                 on_forget_ble: Optional[Callable] = None,
+                 on_auto_save: Optional[Callable] = None):
         self._root = root
         self._slot_calibrations = slot_calibrations
         self._slot_cal_mgrs = slot_cal_mgrs
@@ -82,9 +83,8 @@ class ControllerUI:
         self._on_test_rumble_all = on_test_rumble_all
         self._on_save = on_save
         self._on_forget_ble = on_forget_ble
+        self._on_auto_save = on_auto_save
 
-        # Dirty (unsaved changes) tracking per slot
-        self._slot_dirty: List[bool] = [False] * MAX_SLOTS
         self._slot_connected: List[bool] = [False] * MAX_SLOTS
         self._slot_emulating: List[bool] = [False] * MAX_SLOTS
         self._initializing = True
@@ -166,11 +166,14 @@ class ControllerUI:
                             on_stick_cal, on_trigger_cal, on_pair)
             self.slots.append(slot_ui)
 
-        # Track global setting changes
-        self.auto_connect_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
-        self.emu_mode_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
-        self.trigger_mode_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
-        self.minimize_to_tray_var.trace_add('write', lambda *_: self.mark_slot_dirty(0))
+        # Track global setting changes — auto-save when changed
+        def _on_setting_changed(*_):
+            if not self._initializing and self._on_auto_save:
+                self._on_auto_save()
+        self.auto_connect_var.trace_add('write', _on_setting_changed)
+        self.emu_mode_var.trace_add('write', _on_setting_changed)
+        self.trigger_mode_var.trace_add('write', _on_setting_changed)
+        self.minimize_to_tray_var.trace_add('write', _on_setting_changed)
 
     def _build_tab(self, index: int, slot_ui: SlotUI,
                    on_connect, on_stick_cal, on_trigger_cal,
@@ -354,11 +357,10 @@ class ControllerUI:
         s.controller_visual.update_player_leds(slot_index + 1 if connected else 0)
 
     def _refresh_tab_title(self, slot_index: int):
-        """Rebuild tab title from connection, emulation, and dirty state."""
+        """Rebuild tab title from connection state."""
         prefix = "\u2713 " if self._slot_connected[slot_index] else ""
         base = f"Controller {slot_index + 1}"
-        dirty = " *" if self._slot_dirty[slot_index] else ""
-        new_name = prefix + base + dirty
+        new_name = prefix + base
         old_name = self._tab_names[slot_index]
 
         if new_name != old_name:
@@ -370,20 +372,6 @@ class ControllerUI:
                     self.tabview._current_name = new_name
             except Exception:
                 pass
-
-    def mark_slot_dirty(self, slot_index: int):
-        """Mark a slot as having unsaved changes."""
-        if self._initializing:
-            return
-        if not self._slot_dirty[slot_index]:
-            self._slot_dirty[slot_index] = True
-            self._refresh_tab_title(slot_index)
-
-    def mark_all_clean(self):
-        """Clear unsaved-changes indicators on all slots."""
-        self._slot_dirty = [False] * MAX_SLOTS
-        for i in range(MAX_SLOTS):
-            self._refresh_tab_title(i)
 
     # ── Reset ────────────────────────────────────────────────────────
 
