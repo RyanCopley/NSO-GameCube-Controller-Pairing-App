@@ -1,6 +1,10 @@
 {
   "version": 3,
   "global": {
+    "auto_connect": true,
+    "trigger_bump_100_percent": false,
+    "auto_scan_ble": true,
+    "emulation_mode": "xbox360",
     "known_ble_devices": {
       "3C:A9:AB:60:22:B0/P": {
         "trigger_right_bump": 181.0,
@@ -85,12 +89,92 @@
         "stick_left_range_x": 1224.0,
         "stick_left_range_y": 1255.5,
         "stick_right_range_y": 1134.5
+      },
+      "3C:A9:AB:60:24:BF/P": {
+        "trigger_left_base": 31.0,
+        "trigger_right_base": 31.0,
+        "trigger_right_max": 242.0,
+        "stick_left_range_x": 1221.0,
+        "stick_right_range_x": 1120.0,
+        "stick_right_range_y": 1106.0,
+        "stick_left_range_y": 1256.5,
+        "stick_right_octagon": [
+          [
+            1.0,
+            -0.028933092224231464
+          ],
+          [
+            0.7321428571428571,
+            0.7160940325497287
+          ],
+          [
+            0.029464285714285714,
+            1.0
+          ],
+          [
+            -0.7482142857142857,
+            0.7188065099457505
+          ],
+          [
+            -1.0,
+            0.037070524412296565
+          ],
+          [
+            -0.7446428571428572,
+            -0.6844484629294756
+          ],
+          [
+            -0.014285714285714285,
+            -1.0
+          ],
+          [
+            0.78125,
+            -0.7423146473779385
+          ]
+        ],
+        "stick_left_octagon": [
+          [
+            1.0,
+            -0.0019896538002387586
+          ],
+          [
+            0.7592137592137592,
+            0.7341822522881019
+          ],
+          [
+            0.042588042588042586,
+            1.0
+          ],
+          [
+            -0.7616707616707616,
+            0.7015519299641862
+          ],
+          [
+            -1.0,
+            -0.019498607242339833
+          ],
+          [
+            -0.7526617526617526,
+            -0.7182650218861918
+          ],
+          [
+            -0.015561015561015561,
+            -1.0
+          ],
+          [
+            0.737919737919738,
+            -0.7477118981297254
+          ]
+        ],
+        "trigger_right_bump": 199.0,
+        "trigger_left_bump": 181.0,
+        "stick_right_center_x": 2151.0,
+        "stick_right_center_y": 2099.0,
+        "stick_left_center_y": 2053.5,
+        "stick_left_center_x": 2110.0,
+        "trigger_left_max": 227.0
       }
     },
-    "auto_connect": true,
-    "minimize_to_tray": true,
-    "auto_scan_ble": true,
-    "trigger_bump_100_percent": false,
-    "emulation_mode": "xbox360"
+    "minimize_to_tray": true
   }
 }

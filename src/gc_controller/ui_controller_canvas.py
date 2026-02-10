@@ -403,6 +403,16 @@ class GCControllerVisual:
             color = self.LED_COLOR_ON if (i + 1) <= player_num else self.LED_COLOR_OFF
             self.canvas.itemconfigure(self._led_items[i], fill=color)
 
+    def set_single_led(self, led_index: int):
+        """Light exactly one LED, turning all others off.
+
+        Args:
+            led_index: 0–3 index of the LED to light.
+        """
+        for i in range(self.LED_COUNT):
+            color = self.LED_COLOR_ON if i == led_index else self.LED_COLOR_OFF
+            self.canvas.itemconfigure(self._led_items[i], fill=color)
+
     def update_trigger_fill(self, side: str, value_0_255: int):
         """Fill trigger bar proportionally.
 

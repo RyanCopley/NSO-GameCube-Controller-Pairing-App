@@ -94,6 +94,12 @@ class ControllerUI:
         # Tab name tracking for CTkTabview rename
         self._tab_names: List[str] = []
 
+        # BLE scanning LED animation state
+        self._ble_scan_anim_active = False
+        self._ble_scan_anim_step = 0
+        self._ble_scan_anim_timer_id = None
+        self._BLE_SCAN_LED_SEQ = [0, 1, 2, 3, 2, 1]  # bounce pattern
+
         self.slots: List[SlotUI] = []
         self._setup(on_connect, on_cal_wizard, on_save, on_pair)
 
@@ -190,7 +196,7 @@ class ControllerUI:
         slot_ui.controller_visual.pack(padx=8, pady=(8, 0))
 
         slot_ui.status_label = customtkinter.CTkLabel(
-            visual_frame, text="Ready to connect",
+            visual_frame, text="Ready to Connect",
             text_color="#FFFFFF", font=(T.FONT_FAMILY, 14),
             anchor="center",
         )
@@ -368,6 +374,40 @@ class ControllerUI:
                     self.tabview._current_name = new_name
             except Exception:
                 pass
+
+    # ── BLE scanning LED animation ────────────────────────────────────
+
+    def set_ble_scanning(self, active: bool):
+        """Start or stop the BLE scanning LED bounce animation."""
+        if active and not self._ble_scan_anim_active:
+            self._ble_scan_anim_active = True
+            self._ble_scan_anim_step = 0
+            self._ble_scan_anim_tick()
+        elif not active and self._ble_scan_anim_active:
+            self._ble_scan_anim_active = False
+            if self._ble_scan_anim_timer_id is not None:
+                self._root.after_cancel(self._ble_scan_anim_timer_id)
+                self._ble_scan_anim_timer_id = None
+            # Restore correct LED state on all non-connected slots
+            for i in range(MAX_SLOTS):
+                if not self._slot_connected[i]:
+                    self.slots[i].controller_visual.update_player_leds(0)
+
+    def _ble_scan_anim_tick(self):
+        """Advance the bounce animation one step on all visible non-connected slots."""
+        if not self._ble_scan_anim_active:
+            return
+
+        led_index = self._BLE_SCAN_LED_SEQ[self._ble_scan_anim_step % len(self._BLE_SCAN_LED_SEQ)]
+
+        # Only animate the first non-connected slot
+        for i in range(MAX_SLOTS):
+            if not self._slot_connected[i]:
+                self.slots[i].controller_visual.set_single_led(led_index)
+                break
+
+        self._ble_scan_anim_step += 1
+        self._ble_scan_anim_timer_id = self._root.after(100, self._ble_scan_anim_tick)
 
     # ── Reset ────────────────────────────────────────────────────────
 

@@ -281,7 +281,7 @@ class GCControllerEnabler:
         sui.connect_btn.configure(text="Connect USB")
         if sui.pair_btn:
             sui.pair_btn.configure(state='normal')
-        self.ui.update_status(slot_index, "Ready to connect")
+        self.ui.update_status(slot_index, "Ready to Connect")
         self.ui.reset_slot_ui(slot_index)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
@@ -885,11 +885,13 @@ class GCControllerEnabler:
         if self._auto_scan_active:
             return
         self._auto_scan_active = True
+        self.ui.set_ble_scanning(True)
         self._auto_scan_tick()
 
     def _stop_auto_scan(self):
         """Stop the periodic auto-scan loop."""
         self._auto_scan_active = False
+        self.ui.set_ble_scanning(False)
         if self._auto_scan_timer_id is not None:
             self.root.after_cancel(self._auto_scan_timer_id)
             self._auto_scan_timer_id = None
@@ -906,6 +908,7 @@ class GCControllerEnabler:
                 delay_ms, self._auto_scan_tick)
         else:
             self._auto_scan_active = True
+            self.ui.set_ble_scanning(True)
             self._auto_scan_timer_id = self.root.after(
                 delay_ms, self._auto_scan_tick)
 
@@ -1092,7 +1095,7 @@ class GCControllerEnabler:
         if sui.pair_btn:
             sui.pair_btn.configure(text="Pair New Controller", state='normal')
         sui.connect_btn.configure(state='normal')
-        self.ui.update_status(slot_index, "Ready to connect")
+        self.ui.update_status(slot_index, "Ready to Connect")
         self.ui.reset_slot_ui(slot_index)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
@@ -1137,7 +1140,7 @@ class GCControllerEnabler:
 
         # User clicked disconnect while we were waiting — abort
         if slot.input_proc.stop_event.is_set():
-            self.ui.update_status(slot_index, "Ready to connect")
+            self.ui.update_status(slot_index, "Ready to Connect")
             self.ui.update_ble_status(slot_index, "")
             self.ui.reset_slot_ui(slot_index)
             if self.ui.slots[slot_index].pair_btn:
@@ -1294,7 +1297,7 @@ class GCControllerEnabler:
 
         # User clicked Disconnect while we were waiting — abort.
         if slot.input_proc.stop_event.is_set():
-            self.ui.update_status(slot_index, "Ready to connect")
+            self.ui.update_status(slot_index, "Ready to Connect")
             self.ui.reset_slot_ui(slot_index)
             self.ui.update_tab_status(slot_index, connected=False, emulating=False)
             return
