@@ -226,7 +226,7 @@ class BleakBackend:
         on_status("No controller found")
         return None
 
-    async def scan_only(self, scan_timeout: float = 4.0) -> list[dict]:
+    async def scan_only(self, scan_timeout: float = 10.0) -> list[dict]:
         """Run a full BLE scan and return discovered devices.
 
         Returns a list of dicts with keys: address, name, rssi.
