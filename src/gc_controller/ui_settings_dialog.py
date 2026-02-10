@@ -33,9 +33,10 @@ class SettingsDialog:
                  trigger_mode_var: tk.BooleanVar,
                  auto_connect_var: tk.BooleanVar,
                  minimize_to_tray_var: tk.BooleanVar,
-                 on_emulate_all: Callable,
-                 on_test_rumble_all: Callable,
-                 is_any_emulating: Callable[[], bool],
+                 auto_scan_ble_var: tk.BooleanVar = None,
+                 on_emulate_all: Callable = lambda: None,
+                 on_test_rumble_all: Callable = lambda: None,
+                 is_any_emulating: Callable[[], bool] = lambda: False,
                  is_any_connected: Callable[[], bool] = lambda: False,
                  on_save: Optional[Callable] = None,
                  get_known_ble_devices: Optional[Callable] = None,
@@ -45,6 +46,7 @@ class SettingsDialog:
         self._trigger_mode_var = trigger_mode_var
         self._auto_connect_var = auto_connect_var
         self._minimize_to_tray_var = minimize_to_tray_var
+        self._auto_scan_ble_var = auto_scan_ble_var
         self._on_emulate_all = on_emulate_all
         self._on_test_rumble_all = on_test_rumble_all
         self._is_any_emulating = is_any_emulating
@@ -145,6 +147,19 @@ class SettingsDialog:
             text_color=T.TEXT_PRIMARY,
             font=(T.FONT_FAMILY, 14),
         ).pack(anchor=tk.W, pady=(12, 4))
+
+        # ── Auto-scan BLE ──
+        if self._auto_scan_ble_var is not None:
+            customtkinter.CTkCheckBox(
+                left, text="Auto-scan BLE at startup",
+                variable=self._auto_scan_ble_var,
+                fg_color=T.RADIO_FG,
+                hover_color=T.RADIO_HOVER,
+                checkmark_color=T.BTN_TEXT,
+                border_color=T.RADIO_BORDER,
+                text_color=T.TEXT_PRIMARY,
+                font=(T.FONT_FAMILY, 14),
+            ).pack(anchor=tk.W, pady=(4, 4))
 
         # ── Minimize to tray ──
         customtkinter.CTkCheckBox(

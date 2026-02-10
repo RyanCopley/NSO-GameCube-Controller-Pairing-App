@@ -17,7 +17,7 @@ from .controller_constants import DEFAULT_CALIBRATION, MAX_SLOTS, BLE_DEVICE_CAL
 
 # Keys stored in the global section of the config file.
 _GLOBAL_KEYS = {
-    'auto_connect', 'emulation_mode', 'trigger_bump_100_percent',
+    'auto_connect', 'auto_scan_ble', 'emulation_mode', 'trigger_bump_100_percent',
     'minimize_to_tray', 'known_ble_devices',
 }
 

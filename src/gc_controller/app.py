@@ -187,8 +187,8 @@ class GCControllerEnabler:
         if self.slot_calibrations[0]['auto_connect']:
             self.root.after(100, self.auto_connect_and_emulate)
 
-        # Auto-init BLE if we have known addresses
-        if self._ble_available and self._get_known_ble_addresses():
+        # Auto-init BLE if we have known addresses and auto-scan is enabled
+        if self._ble_available and self._get_known_ble_addresses() and self.slot_calibrations[0].get('auto_scan_ble', True):
             self.root.after(500, self._init_ble_async)
 
     # ── Connection ───────────────────────────────────────────────────
@@ -581,7 +581,7 @@ class GCControllerEnabler:
             self._start_auto_scan()
         else:
             self._ble_init_retry_count += 1
-            if self._ble_init_retry_count < 3:
+            if self._ble_init_retry_count < 3 and self.slot_calibrations[0].get('auto_scan_ble', True):
                 # Retry after 30s
                 self.root.after(30000, self._init_ble_async)
 
@@ -1550,6 +1550,10 @@ class GCControllerEnabler:
         """Start the calibration wizard automatically for a newly connected controller."""
         if not self.slots[slot_index].is_connected:
             return
+        # Wait until the controller is actually producing HID data before starting
+        if self._latest_ui_data[slot_index] is None:
+            self.root.after(500, lambda si=slot_index: self._start_auto_calibration(si))
+            return
         self.ui.update_status(slot_index, "New controller — starting calibration...")
         self.calibration_wizard_step(slot_index)
 
@@ -1599,6 +1603,7 @@ class GCControllerEnabler:
         """Update calibration values from UI variables for all slots."""
         # Global settings stored in slot 0's calibration
         self.slot_calibrations[0]['auto_connect'] = self.ui.auto_connect_var.get()
+        self.slot_calibrations[0]['auto_scan_ble'] = self.ui.auto_scan_ble_var.get()
         self.slot_calibrations[0]['emulation_mode'] = self.ui.emu_mode_var.get()
         self.slot_calibrations[0]['trigger_bump_100_percent'] = self.ui.trigger_mode_var.get()
         self.slot_calibrations[0]['minimize_to_tray'] = self.ui.minimize_to_tray_var.get()

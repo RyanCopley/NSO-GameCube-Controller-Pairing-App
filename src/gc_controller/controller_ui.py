@@ -74,6 +74,7 @@ class ControllerUI:
         self.emu_mode_var = tk.StringVar(value=emu_default)
         self.trigger_mode_var = tk.BooleanVar(value=slot_calibrations[0]['trigger_bump_100_percent'])
         self.minimize_to_tray_var = tk.BooleanVar(value=slot_calibrations[0].get('minimize_to_tray', False))
+        self.auto_scan_ble_var = tk.BooleanVar(value=slot_calibrations[0].get('auto_scan_ble', True))
 
         # Callbacks for settings dialog
         self._on_emulate_all = on_emulate_all
@@ -159,10 +160,17 @@ class ControllerUI:
         def _on_setting_changed(*_):
             if not self._initializing and self._on_auto_save:
                 self._on_auto_save()
+        def _on_auto_connect_changed(*_):
+            if not self._initializing:
+                for i in range(len(self.slots)):
+                    self._update_connect_btn_visibility(i)
+
         self.auto_connect_var.trace_add('write', _on_setting_changed)
+        self.auto_connect_var.trace_add('write', _on_auto_connect_changed)
         self.emu_mode_var.trace_add('write', _on_setting_changed)
         self.trigger_mode_var.trace_add('write', _on_setting_changed)
         self.minimize_to_tray_var.trace_add('write', _on_setting_changed)
+        self.auto_scan_ble_var.trace_add('write', _on_setting_changed)
 
     def _build_tab(self, index: int, slot_ui: SlotUI,
                    on_connect, on_cal_wizard,
@@ -217,11 +225,12 @@ class ControllerUI:
             command=lambda i=index: on_connect(i),
             **btn_kwargs,
         )
-        slot_ui.connect_btn.pack(side=tk.LEFT, padx=(0, 4), expand=True, fill=tk.X)
+        if not self.auto_connect_var.get():
+            slot_ui.connect_btn.pack(side=tk.LEFT, padx=(0, 4), expand=True, fill=tk.X)
 
         if self._ble_available and on_pair:
             slot_ui.pair_btn = customtkinter.CTkButton(
-                btn_frame, text="Pair New Controller",
+                btn_frame, text="Pair New Wireless Controller",
                 command=lambda i=index: on_pair(i),
                 **btn_kwargs,
             )
@@ -248,6 +257,7 @@ class ControllerUI:
             trigger_mode_var=self.trigger_mode_var,
             auto_connect_var=self.auto_connect_var,
             minimize_to_tray_var=self.minimize_to_tray_var,
+            auto_scan_ble_var=self.auto_scan_ble_var,
             on_emulate_all=self._on_emulate_all if self._on_emulate_all else lambda: None,
             on_test_rumble_all=self._on_test_rumble_all if self._on_test_rumble_all else lambda: None,
             is_any_emulating=lambda: any(self._slot_emulating),
@@ -326,10 +336,21 @@ class ControllerUI:
         self._slot_connected[slot_index] = connected
         self._slot_emulating[slot_index] = emulating
         self._refresh_tab_title(slot_index)
+        self._update_connect_btn_visibility(slot_index)
 
         # Update player LED indicators
         s = self.slots[slot_index]
         s.controller_visual.update_player_leds(slot_index + 1 if connected else 0)
+
+    def _update_connect_btn_visibility(self, slot_index: int):
+        """Show/hide the Connect USB button based on auto-connect setting."""
+        s = self.slots[slot_index]
+
+        if self.auto_connect_var.get():
+            s.connect_btn.pack_forget()
+        elif not s.connect_btn.winfo_ismapped():
+            before = s.pair_btn if s.pair_btn and s.pair_btn.winfo_ismapped() else s.cal_wizard_btn
+            s.connect_btn.pack(side=tk.LEFT, padx=(0, 4), expand=True, fill=tk.X, before=before)
 
     def _refresh_tab_title(self, slot_index: int):
         """Rebuild tab title from connection state."""

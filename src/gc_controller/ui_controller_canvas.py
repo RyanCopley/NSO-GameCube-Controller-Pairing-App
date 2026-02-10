@@ -41,7 +41,7 @@ class GCControllerVisual:
     CSTICK_GATE_RADIUS = 23     # c-stick movement range (SVG r=59.7 scaled)
     STICK_DOT_RADIUS = 5
     STICK_IMG_MOVE = 8              # max px offset for left stick image tilt
-    CSTICK_IMG_MOVE = 6             # max px offset for C-stick image tilt
+    CSTICK_IMG_MOVE = 16            # max px offset for C-stick image tilt
 
     # ── Trigger bar geometry (positioned above controller image) ──────
     TRIGGER_L_X, TRIGGER_L_Y = 45, 2
@@ -483,6 +483,9 @@ class GCControllerVisual:
             points: list of 8 (raw_x, raw_y) tuples.
             cx_raw, rx, cy_raw, ry: calibration center/range values.
         """
+        if not self._calibrating:
+            return
+
         if side == 'left':
             tag = 'lstick'
             canvas_cx, canvas_cy = self.LSTICK_CX, self.LSTICK_CY
