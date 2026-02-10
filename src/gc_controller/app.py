@@ -38,6 +38,29 @@ from .virtual_gamepad import (
 )
 from .controller_constants import DEFAULT_CALIBRATION, MAX_SLOTS
 from .settings_manager import SettingsManager
+
+
+def _get_settings_dir() -> str:
+    """Return a writable directory for storing settings.
+
+    When running as a frozen PyInstaller bundle the cwd may be read-only
+    (e.g. ``/`` on macOS .app bundles), so we fall back to a platform-
+    appropriate user data directory.  In development (non-frozen) we keep
+    using cwd for backwards compatibility.
+    """
+    if getattr(sys, 'frozen', False):
+        if sys.platform == 'darwin':
+            base = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support')
+        elif sys.platform == 'win32':
+            base = os.environ.get('APPDATA', os.path.expanduser('~'))
+        else:
+            base = os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser('~'), '.config'))
+        settings_dir = os.path.join(base, 'NSO-GC-Controller')
+        os.makedirs(settings_dir, exist_ok=True)
+        return settings_dir
+    return os.getcwd()
+
+
 from .calibration import CalibrationManager
 from .connection_manager import ConnectionManager
 from .emulation_manager import EmulationManager
@@ -96,7 +119,7 @@ class GCControllerEnabler:
         self.slot_calibrations = [dict(DEFAULT_CALIBRATION) for _ in range(MAX_SLOTS)]
 
         # Settings
-        self.settings_mgr = SettingsManager(self.slot_calibrations, os.getcwd())
+        self.settings_mgr = SettingsManager(self.slot_calibrations, _get_settings_dir())
         self.settings_mgr.load()
 
         # Ensure known_ble_devices exists in global config (slot 0)
@@ -2067,7 +2090,7 @@ def run_headless(mode_override: str = None):
 
     slot_calibrations = [dict(DEFAULT_CALIBRATION) for _ in range(MAX_SLOTS)]
 
-    settings_mgr = SettingsManager(slot_calibrations, os.getcwd())
+    settings_mgr = SettingsManager(slot_calibrations, _get_settings_dir())
     settings_mgr.load()
 
     # Use explicit --mode if given, otherwise honor the saved setting from slot 0

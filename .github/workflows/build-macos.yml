@@ -1,0 +1,34 @@
+name: Build macOS (test)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install system dependencies
+        run: brew install libusb
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller gc_controller_enabler.spec
+
+      - name: Zip macOS app bundle
+        run: cd dist && zip -r NSO-GameCube-Controller-Pairing-App-macOS.zip NSO-GameCube-Controller-Pairing-App.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NSO-GameCube-Controller-Pairing-App-macOS
+          path: dist/NSO-GameCube-Controller-Pairing-App-macOS.zip
