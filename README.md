@@ -24,21 +24,24 @@ A cross-platform Python/Tkinter tool that connects the [Nintendo Switch Online G
 |---|---|---|---|
 | USB connection | Yes | Yes | Yes |
 | Bluetooth (BLE) | Yes | Yes | Yes |
-| Rumble (USB) | No* | Yes | ? |
-| Rumble (BLE) | Yes | Yes | ? |
+| Rumble (USB) | No* | Yes | No |
+| Rumble (BLE) | Yes | Yes | No |
 | Xbox 360 emulation | Yes (ViGEmBus) | Yes (evdev/uinput) | — |
 | Dolphin pipe mode | — | Yes | Yes |
 
 \* **Windows USB rumble**: The controller's command interface is not accessible through the Windows HID driver. Rumble works over Bluetooth, or over USB if you install a [WinUSB driver via Zadig](https://zadig.akeo.ie/) for the controller's vendor-specific interface (interface 1).
 
-## Bluetooth Chipset Compatibility
+## Verified Bluetooth Chipset Compatibility
 
 | Chipset | Tested Adapter | Status |
 |---|---|---|
-| Qualcomm | TP-Link UB500 (USB ID `2357:0604`) | Working |
-| Realtek RTL8761B | MSI onboard (Foxconn, USB ID `0489:e10a`) | Working |
-| Intel | Unknown | Partial (pairing works, reconnection is glitchy) |
-| Broadcom | — | Unknown |
+| Qualcomm | [Amazon](https://www.amazon.com/dp/B09DMP6T22) | Working |
+| Intel AX200 | [Amazon](https://www.amazon.com/dp/B0CHMJ12D3) | Working |
+| Realtek RTL8761B | Onboard | Working |
+
+For any onboard or PCI-E based Bluetooth adapters, if it do not have an external antenna, you are likely to experience laggy inputs. The USB Bluetooth adapter linked above works really well.
+
+For any USB Bluetooth adapter, plug it into the front of your computer, not the rear.
 
 ## Requirements
 
