@@ -8,6 +8,7 @@ from BlueRetro (darthcloud) and ndeadly's switch2_input_viewer.py.
 from __future__ import annotations
 
 import asyncio
+import os
 import struct
 from typing import Callable, Optional
 
@@ -220,6 +221,12 @@ try:
 except ImportError:
     _BUMBLE_AVAILABLE = False
 
+try:
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    _AES_AVAILABLE = True
+except ImportError:
+    _AES_AVAILABLE = False
+
 # --- Fixed ATT Handles ---
 H_OUT_CMD = 0x0016      # Command + rumble prefix output handle
 H_SVC1_ENABLE = 0x0005
@@ -245,19 +252,11 @@ SPI_PAIRING_DATA = (0x00, 0xA0, 0x1F, 0x00)  # 0x001FA000
 # --- LED map (player indicators) ---
 LED_MAP = [0x01, 0x03, 0x05, 0x06, 0x07, 0x09, 0x0A, 0x0B]
 
-# --- Pairing crypto constants from BlueRetro ---
-PAIR_STEP2 = bytes([
-    CMD_PAIRING, REQ_TYPE, IFACE_BLE, 0x04,
-    0x00, 0x11, 0x00, 0x00, 0x00,
-    0xEA, 0xBD, 0x47, 0x13, 0x89, 0x35, 0x42,
-    0xC6, 0x79, 0xEE, 0x07, 0xF2, 0x53, 0x2C, 0x6C, 0x31,
-])
-
-PAIR_STEP3 = bytes([
-    CMD_PAIRING, REQ_TYPE, IFACE_BLE, 0x02,
-    0x00, 0x11, 0x00, 0x00, 0x00,
-    0x40, 0xB0, 0x8A, 0x5F, 0xCD, 0x1F, 0x9B,
-    0x41, 0x12, 0x5C, 0xAC, 0xC6, 0x3F, 0x38, 0xA0, 0x73,
+# --- Pairing crypto constants (from ndeadly's switch2_controller_research) ---
+# Fixed controller public key B1
+CONTROLLER_PUBLIC_KEY_B1 = bytes([
+    0x5C, 0xF6, 0xEE, 0x79, 0x2C, 0xDF, 0x05, 0xE1,
+    0xBA, 0x2B, 0x63, 0x25, 0xC4, 0x1A, 0x5F, 0x10,
 ])
 
 PAIR_STEP4 = bytes([
@@ -304,6 +303,22 @@ def build_pair_step1(local_addr_bytes: bytes) -> bytes:
     ]) + addr + bytes(addr_m1)
 
 
+def build_pair_step2(a1_key: bytes) -> bytes:
+    """Build pairing step 2: send 16-byte public key A1 (subcommand 0x04)."""
+    return bytes([
+        CMD_PAIRING, REQ_TYPE, IFACE_BLE, 0x04,
+        0x00, 0x11, 0x00, 0x00, 0x00,
+    ]) + bytes(a1_key)
+
+
+def build_pair_step3(a2_challenge: bytes) -> bytes:
+    """Build pairing step 3: send 16-byte challenge A2 (subcommand 0x02)."""
+    return bytes([
+        CMD_PAIRING, REQ_TYPE, IFACE_BLE, 0x02,
+        0x00, 0x11, 0x00, 0x00, 0x00,
+    ]) + bytes(a2_challenge)
+
+
 async def _write_handle(peer: Peer, handle: int, data: bytes,
                         with_response: bool = False) -> bool:
     """Write to a specific ATT handle."""
@@ -316,6 +331,34 @@ async def _write_handle(peer: Peer, handle: int, data: bytes,
         return True
     except Exception as e:
         print(f"  BLE write to 0x{handle:04X} failed: {e}")
+        return False
+
+
+def _xor_bytes(a: bytes, b: bytes) -> bytes:
+    """XOR two equal-length byte strings."""
+    return bytes(x ^ y for x, y in zip(a, b))
+
+
+def _extract_pair_key(resp: Optional[bytes]) -> Optional[bytes]:
+    """Try to extract 16-byte key from a pairing command response."""
+    if resp is None or len(resp) < 16:
+        return None
+    # Try payload offset 9 (matches command format header size)
+    if len(resp) >= 25:
+        return bytes(resp[9:25])
+    return bytes(resp[-16:])
+
+
+def _verify_pair_challenge(ltk: bytes, a2: bytes, b2: bytes) -> bool:
+    """Verify B2 == AES-128-ECB(LTK, reverse(A2))."""
+    if not _AES_AVAILABLE:
+        return True
+    try:
+        cipher = Cipher(algorithms.AES(ltk), modes.ECB())
+        encryptor = cipher.encryptor()
+        expected = encryptor.update(bytes(reversed(a2))) + encryptor.finalize()
+        return expected == b2
+    except Exception:
         return False
 
 
@@ -394,17 +437,28 @@ async def sw2_init(peer: Peer, connection, device: Device, slot_index: int,
     if disconnected and disconnected.is_set():
         return False
 
-    # 4b: Send crypto challenge
-    await _write_handle(peer, H_CMD_WRITE, PAIR_STEP2)
+    # 4b: Generate and send public key A1 (subcommand 0x04)
+    a1_key = os.urandom(16)
+    await _write_handle(peer, H_CMD_WRITE, build_pair_step2(a1_key))
     await _wait_cmd_response(timeout=3.0)
     if disconnected and disconnected.is_set():
         return False
 
-    # 4c: Send second crypto value
-    await _write_handle(peer, H_CMD_WRITE, PAIR_STEP3)
-    await _wait_cmd_response(timeout=3.0)
+    # Compute LTK = A1 XOR B1 (B1 is the controller's fixed public key)
+    computed_ltk = _xor_bytes(a1_key, CONTROLLER_PUBLIC_KEY_B1)
+
+    # 4c: Generate and send challenge A2 (subcommand 0x02)
+    a2_challenge = os.urandom(16)
+    await _write_handle(peer, H_CMD_WRITE, build_pair_step3(a2_challenge))
+    resp = await _wait_cmd_response(timeout=3.0)
     if disconnected and disconnected.is_set():
         return False
+
+    # Verify controller's response B2 = AES-128-ECB(LTK, reverse(A2))
+    b2 = _extract_pair_key(resp)
+    if b2:
+        if not _verify_pair_challenge(computed_ltk, a2_challenge, b2):
+            print("  BLE pairing: challenge verification failed")
 
     # 4d: Finalize pairing
     await _write_handle(peer, H_CMD_WRITE, PAIR_STEP4)
@@ -412,38 +466,39 @@ async def sw2_init(peer: Peer, connection, device: Device, slot_index: int,
     if disconnected and disconnected.is_set():
         return False
 
-    # Step 5: Read pairing data (SPI 0x1FA000) — extract LTK for encryption
+    # Step 5: Read pairing data from SPI as fallback LTK source
     on_status("Reading pairing data...")
     cmd = build_spi_read(SPI_PAIRING_DATA, 0x40)
     await _write_handle(peer, H_CMD_WRITE, cmd)
     resp = await _wait_cmd_response(timeout=3.0)
 
-    ltk_bytes = None
+    spi_ltk = None
     ediv_value = 0
     rand_bytes = bytes(8)
 
     if resp and len(resp) >= 16 + 0x30:
         spi = resp[16:]
         unknown1 = spi[0x0E:0x1A]
-        ltk_bytes = bytes(spi[0x1A:0x2A])
+        spi_ltk = bytes(spi[0x1A:0x2A])
         ediv_value = struct.unpack_from("<H", unknown1, 0)[0]
         rand_bytes = bytes(unknown1[2:10])
     elif resp and len(resp) >= 16:
-        ltk_bytes = bytes(resp[-16:])
+        spi_ltk = bytes(resp[-16:])
 
     if disconnected and disconnected.is_set():
         return False
 
-    # Step 6: LE encryption with LTK (if SMP didn't already encrypt)
-    if not connection.is_encrypted and ltk_bytes:
+    # Step 6: LE encryption — try computed LTK first, fall back to SPI
+    if not connection.is_encrypted:
         on_status("Encrypting link...")
         attempts = [
-            (ediv_value, rand_bytes, ltk_bytes),
-            (0, bytes(8), ltk_bytes),
-            (0, bytes(8), bytes(reversed(ltk_bytes))),
+            (0, bytes(8), computed_ltk),
+            (0, bytes(8), bytes(reversed(computed_ltk))),
         ]
-        if ediv_value == 0 and rand_bytes == bytes(8):
-            attempts = attempts[1:]
+        if spi_ltk:
+            attempts.append((ediv_value, rand_bytes, spi_ltk))
+            attempts.append((0, bytes(8), spi_ltk))
+            attempts.append((0, bytes(8), bytes(reversed(spi_ltk))))
 
         for ediv, rand, ltk in attempts:
             if connection.is_encrypted or disconnected and disconnected.is_set():

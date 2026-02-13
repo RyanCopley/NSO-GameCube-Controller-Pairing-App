@@ -2,7 +2,7 @@
 Bumble BLE Backend
 
 Linux-only BLE backend using Google Bumble with raw HCI sockets.
-Bypasses BlueZ entirely for full control over SMP key distribution.
+Bypasses BlueZ entirely for full control over the HCI transport.
 """
 
 import asyncio
@@ -11,9 +11,7 @@ from typing import Callable, Optional
 
 from bumble.device import Device, Peer, ConnectionParametersPreferences
 from bumble.hci import Address, HCI_LE_1M_PHY
-from bumble.pairing import PairingConfig, PairingDelegate
 from bumble.transport import open_transport
-from bumble import smp  # noqa: F401
 
 from .sw2_protocol import sw2_init, translate_ble_to_usb
 
@@ -51,22 +49,6 @@ class BumbleBackend:
             Address("F0:F1:F2:F3:F4:F5"),
             hci_source,
             hci_sink,
-        )
-
-        # Configure SMP for Legacy "Just Works" with exact BlueRetro key distribution
-        self._device.pairing_config_factory = lambda connection: PairingConfig(
-            sc=False,
-            mitm=False,
-            bonding=True,
-            delegate=PairingDelegate(
-                io_capability=PairingDelegate.IoCapability.NO_OUTPUT_NO_INPUT,
-                local_initiator_key_distribution=(
-                    PairingDelegate.KeyDistribution.DISTRIBUTE_IDENTITY_KEY
-                ),
-                local_responder_key_distribution=(
-                    PairingDelegate.KeyDistribution.DISTRIBUTE_ENCRYPTION_KEY
-                ),
-            ),
         )
 
         await self._device.power_on()
@@ -146,33 +128,6 @@ class BumbleBackend:
             on_disconnect()
 
         connection.on("disconnection", _on_disconnection)
-
-        # Handle security requests from controller
-        async def _on_security_request(auth_req):
-            try:
-                await connection.pair()
-            except Exception:
-                pass
-
-        connection.on("security_request",
-                      lambda auth_req: asyncio.ensure_future(
-                          _on_security_request(auth_req)))
-
-        # SMP Legacy pairing
-        on_status("SMP pairing...")
-        try:
-            await connection.pair()
-        except Exception:
-            # Continue without SMP — proprietary pairing may still work
-            if disconnected.is_set():
-                self._connections.pop(mac, None)
-                on_status("Disconnected during pairing")
-                return None
-
-        if disconnected.is_set():
-            self._connections.pop(mac, None)
-            on_status("Disconnected during pairing")
-            return None
 
         # MTU exchange (SW2 input reports are 63 bytes)
         on_status("MTU exchange...")
@@ -255,12 +210,26 @@ class BumbleBackend:
                 # Skip controllers assigned to other slots
                 if addr_str in exclude:
                     return
-                # Match by Nintendo OUI prefix (same approach as PoC's MAC check)
-                for oui in _NINTENDO_OUIS:
-                    if oui in addr_str:
-                        found_mac[0] = addr_str
-                        found_event.set()
-                        return
+                # Check manufacturer data for Nintendo SW2 (company ID 0x0553)
+                is_nintendo = False
+                try:
+                    mfr_data = advertisement.data.get(0xFF, b'')
+                    if len(mfr_data) >= 2:
+                        company_id = int.from_bytes(mfr_data[:2], 'little')
+                        if company_id in (0x0553, 0x057E):
+                            is_nintendo = True
+                except Exception:
+                    pass
+                # Also match by Nintendo OUI prefix
+                if not is_nintendo:
+                    for oui in _NINTENDO_OUIS:
+                        if oui in addr_str:
+                            is_nintendo = True
+                            break
+                if is_nintendo:
+                    found_mac[0] = addr_str
+                    found_event.set()
+                    return
             except Exception:
                 pass
 

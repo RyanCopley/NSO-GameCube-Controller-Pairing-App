@@ -24,8 +24,8 @@ from .sw2_protocol import (
     LED_MAP, build_led_cmd, translate_ble_native_to_usb,
 )
 
-# Nintendo BLE manufacturer company ID (from protocol doc)
-_NINTENDO_COMPANY_ID = 0x037E
+# Nintendo BLE manufacturer company IDs
+_NINTENDO_COMPANY_IDS = (0x0553, 0x057E, 0x037E)
 
 # Known Nintendo controller name substrings
 _NINTENDO_NAME_PATTERNS = (
@@ -185,7 +185,7 @@ class BleakBackend:
             is_nintendo = False
             if adv:
                 md = getattr(adv, 'manufacturer_data', {})
-                if _NINTENDO_COMPANY_ID in md:
+                if any(cid in md for cid in _NINTENDO_COMPANY_IDS):
                     is_nintendo = True
             name_match = name == "devicename" or any(
                 p.lower() in name for p in _NINTENDO_NAME_PATTERNS)
