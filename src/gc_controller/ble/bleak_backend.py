@@ -10,6 +10,7 @@ No elevated privileges needed.
 """
 
 import asyncio
+import platform
 import queue
 import re
 import sys
@@ -21,11 +22,16 @@ from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
 from .sw2_protocol import (
-    LED_MAP, build_led_cmd, translate_ble_native_to_usb,
+    LED_MAP, build_led_cmd, build_spi_read, build_vibration_sample,
+    build_feature_flags, build_version_info,
+    SPI_DEVICE_INFO, SPI_LEFT_STICK_CAL, SPI_RIGHT_STICK_CAL,
+    SPI_UNKNOWN_1FC040, SPI_UNKNOWN_13040, SPI_UNKNOWN_13100,
+    SPI_GC_CAL_2, SPI_TRIGGER_CAL,
+    translate_ble_native_to_usb,
 )
 
-# Nintendo BLE manufacturer company ID (from protocol doc)
-_NINTENDO_COMPANY_ID = 0x037E
+# Nintendo BLE manufacturer company IDs
+_NINTENDO_COMPANY_IDS = (0x0553, 0x057E, 0x037E)
 
 # Known Nintendo controller name substrings
 _NINTENDO_NAME_PATTERNS = (
@@ -38,15 +44,8 @@ _HANDSHAKE_CMD = bytearray([
     0x00, 0x08, 0x00, 0x00, 0x40, 0x7e, 0x00, 0x00, 0x00, 0x30, 0x01, 0x00
 ])
 
-# Init commands sent after handshake (from nso-gc-bridge)
-_DEFAULT_REPORT_DATA = bytearray([
-    0x03, 0x91, 0x00, 0x0d, 0x00, 0x08,
-    0x00, 0x00, 0x01, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
-])
-
-_SET_INPUT_MODE = bytearray([
-    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x30
-])
+# Report rate characteristic UUID (for write after init)
+_REPORT_RATE_UUID = "679d5510-5a24-4dee-9557-95df80486ecb"
 
 
 def _log(msg: str):
@@ -185,7 +184,7 @@ class BleakBackend:
             is_nintendo = False
             if adv:
                 md = getattr(adv, 'manufacturer_data', {})
-                if _NINTENDO_COMPANY_ID in md:
+                if any(cid in md for cid in _NINTENDO_COMPANY_IDS):
                     is_nintendo = True
             name_match = name == "devicename" or any(
                 p.lower() in name for p in _NINTENDO_NAME_PATTERNS)
@@ -337,6 +336,26 @@ class BleakBackend:
         except Exception:
             pass
 
+        # Request lower connection interval on Windows 11+ for reduced input latency.
+        # Windows 10 defaults to 30-60ms intervals with no API to change them.
+        # Windows 11 (build 22000+) exposes ThroughputOptimized (~7.5-15ms).
+        if sys.platform == 'win32':
+            try:
+                build_number = int(platform.version().split('.')[-1])
+                if build_number >= 22000:
+                    from bleak.backends.winrt.client import BleakClientWinRT
+                    from winrt.windows.devices.bluetooth import (
+                        BluetoothLEPreferredConnectionParameters,
+                    )
+                    backend = client._backend
+                    if isinstance(backend, BleakClientWinRT):
+                        backend._requester.request_preferred_connection_parameters(
+                            BluetoothLEPreferredConnectionParameters.throughput_optimized
+                        )
+                        _log("  Requested ThroughputOptimized connection parameters")
+            except Exception as e:
+                _log(f"  Connection parameter optimization skipped: {e}")
+
         # Discover services and find write/notify characteristics
         write_chars = []
         notify_chars = []
@@ -387,11 +406,11 @@ class BleakBackend:
         self._clients[address] = client
         self._write_chars[address] = handshake_char
 
-        # Identify the command channel for vibration commands.
+        # Identify the command channel (ndeadly defaults to 0x0014).
         # The Nintendo SW2 service has 3 WriteNoResp characteristics:
         #   1st (lowest handle): Vibration/rumble output (0x0012)
-        #   2nd: Command channel (0x0014) — accepts SW2 commands like 0x0A
-        #   3rd (highest handle): Command + rumble prefix (0x0016)
+        #   2nd: Command channel (0x0014) — accepts SW2 commands directly
+        #   3rd (highest handle): Alt command channel (0x0016) — needs 33-byte prefix
         # Find the service with ≥3 WriteNoResp chars, take the 2nd by handle.
         for svc in client.services:
             wnr = sorted(
@@ -436,25 +455,59 @@ class BleakBackend:
             except Exception as e:
                 _log(f"  Failed to subscribe to {char.uuid}: {e}")
 
-        # Send init commands (from nso-gc-bridge approach).
-        # SW2 protocol commands (like LED set) must go to the command channel
-        # characteristic (2nd WriteNoResp by handle = 0x0014 equivalent), not
-        # the handshake char.  Using the wrong characteristic causes the
-        # controller to silently ignore the command — this is why player LEDs
-        # didn't light up on macOS/Windows while working on Linux (Bumble
-        # writes directly to handle 0x0014).
+        # Full ndeadly init sequence (excluding proprietary pairing — OS handles SMP).
+        # All SW2 commands go to the 2nd WriteNoResp char (0x0014 equivalent).
         cmd_char = self._cmd_chars.get(address, handshake_char)
-        for data in (_DEFAULT_REPORT_DATA, bytearray(build_led_cmd(
-                LED_MAP[min(slot_index, len(LED_MAP) - 1)]))):
-            try:
-                await client.write_gatt_char(cmd_char, data, response=False)
-            except Exception:
-                pass
 
+        async def _send_cmd(data, label=""):
+            try:
+                await client.write_gatt_char(cmd_char, bytearray(data), response=False)
+                if label:
+                    _log(f"    Sent {label}")
+                await asyncio.sleep(0.15)
+            except Exception as e:
+                if label:
+                    _log(f"    Failed {label}: {e}")
+
+        on_status("Initializing controller...")
+
+        # SPI read device info
+        await _send_cmd(build_spi_read(SPI_DEVICE_INFO, 0x40), "SPI device info")
+        # Vibration sample
+        await _send_cmd(build_vibration_sample(0x03), "vibration sample")
+        # Set LED
+        led_idx = min(slot_index, len(LED_MAP) - 1)
+        await _send_cmd(build_led_cmd(LED_MAP[led_idx]), "LED")
+        # Configure features 0xFF (subcmd 0x02)
+        await _send_cmd(build_feature_flags(0x02, 0xFF), "configure features")
+        # SPI calibration reads
+        for spi_addr, size, label in [
+            (SPI_LEFT_STICK_CAL, 0x40, "left stick cal"),
+            (SPI_RIGHT_STICK_CAL, 0x40, "right stick cal"),
+            (SPI_UNKNOWN_1FC040, 0x40, "user cal"),
+            (SPI_UNKNOWN_13040, 0x10, "gyro cal"),
+            (SPI_UNKNOWN_13100, 0x18, "accel/mag cal"),
+        ]:
+            await _send_cmd(build_spi_read(spi_addr, size), label)
+        # GC-specific calibration reads
+        await _send_cmd(build_spi_read(SPI_TRIGGER_CAL, 0x02), "trigger cal")
+        await _send_cmd(build_spi_read(SPI_GC_CAL_2, 0x20), "GC cal 2")
+        # Enable features 0x03 (subcmd 0x04)
+        await _send_cmd(build_feature_flags(0x04, 0x03), "enable features")
+        # Firmware version
+        await _send_cmd(build_version_info(), "version info")
+
+        # Set report rate
         try:
-            await client.write_gatt_char(handshake_char.uuid, _SET_INPUT_MODE)
-        except Exception:
-            pass
+            for svc in client.services:
+                for char in svc.characteristics:
+                    if char.uuid.lower() == _REPORT_RATE_UUID:
+                        await client.write_gatt_char(char, bytearray([0x85, 0x00]),
+                                                     response=True)
+                        _log(f"    Set report rate on {char.uuid}")
+                        break
+        except Exception as e:
+            _log(f"    Report rate write failed: {e}")
 
         _log(f"  Init complete for slot {slot_index}")
 

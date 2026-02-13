@@ -218,6 +218,7 @@ platform/
 - [Nohzockt/Switch2-Controllers](https://github.com/Nohzockt/Switch2-Controllers) — Switch controller protocol reference
 - [isaacs-12/nso-gc-bridge](https://github.com/isaacs-12/nso-gc-bridge) — macOS Bluetooth support reference
 - [darthcloud/BlueRetro](https://github.com/darthcloud/BlueRetro) — Bluetooth protocol reference
+- [ndeadly/switch2_controller_research](https://github.com/ndeadly/switch2_controller_research) — Switch 2 BLE protocol research and init sequence
 
 ## License
 

@@ -4,7 +4,7 @@ A library-agnostic guide for connecting the Nintendo Switch Online GameCube Cont
 
 This controller uses a **proprietary Switch 2 (SW2) BLE protocol** that differs significantly from the original Switch Pro Controller protocol. Simply enabling GATT notifications is not enough — the controller requires SMP pairing with specific parameters, an MTU exchange, and a multi-step proprietary initialization sequence before it will send input data.
 
-**Sources**: [BlueRetro](https://github.com/darthcloud/BlueRetro) (darthcloud), [switch2_input_viewer](https://github.com/ndeadly/switch2_input_viewer) (ndeadly), and original research.
+**Sources**: [BlueRetro](https://github.com/darthcloud/BlueRetro) (darthcloud), [switch2_controller_research](https://github.com/ndeadly/switch2_controller_research) (ndeadly), and original research.
 
 ---
 
@@ -68,15 +68,18 @@ There is no USB command to trigger BLE advertising — the full USB command spac
 ├─────────────────────────────────┤
 │  4. GATT Discovery              │
 ├─────────────────────────────────┤
-│  5. SW2 Protocol Init           │
+│  5. SW2 Protocol Init (23 steps)│
 │    a. Enable service (0x0005)   │
 │    b. Enable cmd CCCD (0x001B)  │
-│    c. SPI reads                 │
+│    c. Init cmds + SPI reads     │
 │    d. Proprietary pairing       │
-│    e. Set LED                   │
+│    e. LE encryption              │
+│    f. Vibration, LED, features  │
+│    g. Calibration SPI reads     │
+│    h. Report rate (0x0010)      │
 ├─────────────────────────────────┤
 │  6. Enable Input Notifications  │
-│    - Write 0x0100 to 0x000B     │
+│    - Write 0x0100 to 0x000F     │
 │    - Write 0x0000 to 0x001B     │
 ├─────────────────────────────────┤
 │  ✓ Input data flows on 0x000E  │
@@ -146,45 +149,44 @@ Perform standard GATT service and characteristic discovery. The controller expos
 
 ---
 
-## Step 5: SW2 Protocol Initialization
+## Step 5: SW2 Protocol Initialization (26 Steps)
 
 All SW2 commands are written to handle `0x0014` (WriteWithoutResponse) and responses arrive as notifications on handle `0x001A`.
 
-### 5a. Enable Proprietary Service
+> **Note**: There are two valid command channel pairs. Handle `0x0014`/`0x001A` is the primary pair — commands are sent directly. Handle `0x0016`/`0x001E` is the secondary pair — commands require a 33-byte zero prefix, and responses have a 14-byte header before the actual data. ndeadly's switch2_input_viewer defaults to the primary pair.
 
-Write `0x01 0x00` to handle `0x0005` (with response).
+The full sequence below is derived from ndeadly's switch2_input_viewer.
 
-This activates the SW2 proprietary service. Without this, commands on `0x0014` will not produce responses.
+| Step | Action | Handle | Details |
+|------|--------|--------|---------|
+| 1 | Enable service | 0x0005 | Write `01 00` (with response) |
+| 2 | Enable cmd response CCCD | 0x001B | Write `01 00`, subscribe to 0x001A |
+| 3 | SPI read device info | 0x0014 | Address 0x13000, 0x40 bytes |
+| 4-7 | Proprietary pairing (Bumble only) | 0x0014 | cmd 0x15, subcmds 0x01-0x04 |
+| 8 | SPI read pairing data (Bumble only) | 0x0014 | Address 0x1FA000, 0x40 bytes |
+| 9 | LE encryption (Bumble only) | HCI | Use computed or SPI LTK |
+| 10 | Vibration sample | 0x0014 | cmd 0x0A, subcmd 0x02, index 0x03 |
+| 11 | Set LED | 0x0014 | cmd 0x09, subcmd 0x07 |
+| 12 | Configure features 0xFF | 0x0014 | cmd 0x0C, subcmd 0x02, flags 0xFF |
+| 13 | SPI read left stick cal | 0x0014 | Address 0x13080, 0x40 bytes |
+| 14 | SPI read right stick cal | 0x0014 | Address 0x130C0, 0x40 bytes |
+| 15 | SPI read user cal | 0x0014 | Address 0x1FC040, 0x40 bytes |
+| 16 | SPI read gyro cal | 0x0014 | Address 0x13040, 0x10 bytes |
+| 17 | SPI read accel/mag cal | 0x0014 | Address 0x13100, 0x18 bytes |
+| 18 | SPI read trigger cal (GC) | 0x0014 | Address 0x13140, 0x02 bytes |
+| 19 | SPI read GC cal 2 (GC) | 0x0014 | Address 0x13160, 0x20 bytes |
+| 20 | Enable features 0x03 | 0x0014 | cmd 0x0C, subcmd 0x04, flags 0x03 |
+| 21 | Get firmware version | 0x0014 | cmd 0x10, subcmd 0x01 |
+| 22 | Set report rate | 0x0010 | Write `85 00` (descriptor, with response) |
+| 23 | Enable GC input, disable cmd CCCD | 0x000F/0x001B | `01 00` / `00 00` |
 
-### 5b. Enable Command Response Notifications
+Steps 4-9 are only performed on Linux (Bumble backend) which handles proprietary pairing and LE encryption at the HCI level. On macOS/Windows (Bleak backend), the OS BLE stack handles SMP pairing automatically.
 
-Write `0x01 0x00` to handle `0x001B` (CCCD for command response characteristic).
-
-Set up a notification handler on handle `0x001A` to receive command responses. All subsequent SW2 commands will produce responses on this handle.
-
-### 5c. SPI Flash Reads
-
-Read device info from the controller's SPI flash to verify communication:
-
-**Device info read** (address `0x00013000`, 64 bytes):
-```
-02 91 01 04 00 08 00 00 40 7E 00 00 00 30 01 00
-```
-
-The response contains the controller's serial number, VID (`0x057E`), and PID (`0x2073`).
-
-**Pairing data read** (address `0x001FA000`, 64 bytes):
-```
-02 91 01 04 00 08 00 00 40 7E 00 00 00 A0 1F 00
-```
-
-The response contains host addresses and the LTK (for reconnection/bonding, at offset 0x1A within the SPI data). The response has a 16-byte header before the SPI data begins.
-
-### 5d. Proprietary Pairing Handshake
+### Proprietary Pairing (Steps 4-7, Bumble only)
 
 A 4-step cryptographic handshake using command ID `0x15`. All commands are written to handle `0x0014`. Wait for a response on `0x001A` after each step.
 
-**Step 1** — Send local BLE address:
+**Step 4** — Send local BLE address:
 ```
 15 91 01 01 00 0E 00 00 00 02
 [6 bytes: local BLE address]
@@ -193,26 +195,32 @@ A 4-step cryptographic handshake using command ID `0x15`. All commands are writt
 
 The local BLE address is the adapter's BLE MAC address in byte order as reported by the HCI controller (typically little-endian, i.e., least significant byte first).
 
-**Step 2** — Send crypto nonce:
+**Step 5** — Send random public key A1 (subcommand 0x04):
 ```
 15 91 01 04 00 11 00 00 00
-EA BD 47 13 89 35 42 C6 79 EE 07 F2 53 2C 6C 31
+[16 bytes: random A1 key]
 ```
 
-**Step 3** — Send second crypto value:
+The response contains the controller's public key B1 (fixed: `5C F6 EE 79 2C DF 05 E1 BA 2B 63 25 C4 1A 5F 10`).
+
+Compute the LTK: `LTK = A1 XOR B1`
+
+**Step 6** — Send random challenge A2 (subcommand 0x02):
 ```
 15 91 01 02 00 11 00 00 00
-40 B0 8A 5F CD 1F 9B 41 12 5C AC C6 3F 38 A0 73
+[16 bytes: random A2 challenge]
 ```
 
-**Step 4** — Finalize pairing:
+The response contains B2. Verify: `B2 == AES-128-ECB(reverse(LTK), reverse(A2))`.
+
+**Important**: The LTK must be byte-reversed before use as the AES key.
+
+**Step 7** — Finalize pairing:
 ```
 15 91 01 03 00 01 00 00 00
 ```
 
-The crypto nonces in steps 2–3 are fixed values from BlueRetro. Each step should produce a valid response within 3 seconds. If any step times out or the controller disconnects, the pairing has failed.
-
-### 5e. Set Player LED
+### LED Command (Step 11)
 
 Send an LED command to indicate which player slot the controller is assigned to:
 
@@ -233,14 +241,14 @@ LED mask values for player positions:
 
 ## Step 6: Enable Input Notifications
 
-This is the final step. Write **two** values simultaneously:
+This is the final step (step 23 in the full sequence). Write **two** values:
 
-1. **Enable input CCCD**: Write `0x01 0x00` to handle `0x000B` (with response)
+1. **Enable GC input CCCD**: Write `0x01 0x00` to handle `0x000F` (with response)
 2. **Disable command response CCCD**: Write `0x00 0x00` to handle `0x001B` (with response)
 
-Both writes are required. BlueRetro disables the command response CCCD at the same time as enabling input — omitting the second write may prevent notifications from flowing.
+Both writes are required. The command response CCCD must be disabled at the same time as enabling GC input — omitting the second write may prevent notifications from flowing.
 
-After this step, **63-byte input reports** will arrive as notifications on handle **`0x000E`** (not `0x000A`). Data arrives at approximately 125 Hz (8 ms interval).
+After this step, **63-byte input reports** will arrive as notifications on handle **`0x000E`**. Data arrives at approximately 125 Hz (8 ms interval) after the report rate is set to `0x85 0x00` on handle `0x0010`.
 
 ---
 
@@ -256,15 +264,18 @@ After this step, **63-byte input reports** will arrive as notifications on handl
 
 | Handle | Type | Properties | Purpose |
 |--------|------|------------|---------|
-| 0x000A | Characteristic | Read, Notify | Input report (format 0) |
-| 0x000B | CCCD | — | **Input report CCCD** (write `0x01 0x00` to enable) |
-| 0x000E | Characteristic | Read, Notify | **Input report (format 3)** — 63-byte reports arrive here |
-| 0x000F | CCCD | — | Input type 2 CCCD |
+| 0x000A | Characteristic | Read, Notify | Input report (format 0, legacy) |
+| 0x000B | CCCD | — | CCCD for 0x000A (legacy) |
+| 0x000E | Characteristic | Read, Notify | **GC input report (format 3)** — 63-byte reports arrive here |
+| 0x000F | CCCD | — | **GC input CCCD** (write `0x01 0x00` to enable) |
+| 0x0010 | Descriptor | Write | **Report rate** — write `0x85 0x00` for ~125 Hz (UUID: `679d5510-...`) |
 | 0x0012 | Characteristic | WriteNoResp | Vibration/rumble output |
-| 0x0014 | Characteristic | WriteNoResp | **Command channel** (SW2 protocol commands) |
-| 0x0016 | Characteristic | WriteNoResp | Command + rumble prefix channel |
-| 0x001A | Characteristic | Notify | **Command response/ACK** |
-| 0x001B | CCCD | — | **Command response CCCD** |
+| 0x0014 | Characteristic | WriteNoResp | **Command channel** (SW2 protocol commands, ndeadly default) |
+| 0x0016 | Characteristic | WriteNoResp | Alt command channel (requires 33-byte zero prefix) |
+| 0x001A | Characteristic | Notify | **Command response** (for 0x0014 writes) |
+| 0x001B | CCCD | — | **Command response CCCD** (write `0x01 0x00` to enable) |
+| 0x001E | Characteristic | Notify | Alt command response (for 0x0016 writes, 14-byte header) |
+| 0x001F | CCCD | — | CCCD for 0x001E |
 
 ### Service 3: `00001800` (GAP)
 
@@ -281,7 +292,7 @@ Empty service (handle 0x0030).
 
 ## SW2 Command Format
 
-All commands are written to handle `0x0014` (WriteWithoutResponse).
+All commands are written to handle `0x0014` (WriteWithoutResponse). Responses arrive on `0x001A`.
 
 ```
 Byte 0:    Command ID
@@ -300,6 +311,9 @@ Byte 8+:   Command-specific data
 |----|------|--------------|
 | `0x02` | SPI Flash Read | `0x04` = read |
 | `0x09` | Set LED | `0x07` = set player LED |
+| `0x0A` | Vibration | `0x02` = play sample |
+| `0x0C` | Feature Flags | `0x02` = configure, `0x04` = enable, `0x05` = disable |
+| `0x10` | Version Info | `0x01` = get firmware version |
 | `0x15` | Proprietary Pairing | `0x01`–`0x04` = pairing steps 1–4 |
 
 ### SPI Read Command
@@ -321,11 +335,15 @@ Bytes 16+:    SPI flash data
 
 | Address | Size | Contents |
 |---------|------|----------|
-| `0x00013000` | 64 | Device info (serial, VID, PID) |
-| `0x001FA000` | 64 | Pairing data (host addresses, LTK at offset 0x1A) |
-| `0x00013080` | 64 | Left stick factory calibration |
-| `0x000130C0` | 64 | Right stick factory calibration |
-| `0x00013140` | 64 | Trigger calibration |
+| `0x00013000` | 0x40 | Device info (serial, VID, PID, colours) |
+| `0x00013040` | 0x10 | Gyro calibration (temperature + bias) |
+| `0x00013080` | 0x40 | Primary stick factory calibration |
+| `0x000130C0` | 0x40 | Secondary stick factory calibration |
+| `0x00013100` | 0x18 | Accelerometer / magnetometer calibration |
+| `0x00013140` | 0x02 | Analog trigger calibration (GC-specific) |
+| `0x00013160` | 0x20 | GC calibration 2 (GC-specific) |
+| `0x001FA000` | 0x40 | Pairing data (host addresses, LTK at offset 0x1A) |
+| `0x001FC040` | 0x40 | User stick calibrations |
 
 ---
 
@@ -449,29 +467,25 @@ The triggers have both analog values (bytes `0x0C`–`0x0D`) and digital click b
 
 **Fix**: Request MTU ≥ 185 before GATT discovery.
 
-### 3. Sending feature configure/enable commands
+### 3. Feature flags (cmd 0x0C) ARE required
 
-**Symptom**: Unpredictable controller behavior or no notifications.
+**Note**: Earlier versions of this document stated that cmd `0x0C` should not be sent. This was incorrect — ndeadly's switch2_input_viewer includes feature flags as a required part of the init sequence.
 
-**Cause**: Some early reverse-engineering efforts included feature configure (cmd `0x0C` subcmd `0x02`) and feature enable (cmd `0x0C` subcmd `0x04`) commands. These are **NOT** part of BlueRetro's working protocol and appear to confuse the controller.
-
-**Fix**: Do not send cmd `0x0C` at all.
+**Correct usage**: Send `0x0C` with subcmd `0x02` (configure, flags `0xFF`) before calibration reads, then `0x0C` with subcmd `0x04` (enable, flags `0x03`) after calibration reads.
 
 ### 4. Not disabling command response CCCD when enabling input
 
 **Symptom**: Input CCCD written successfully but no notifications.
 
-**Cause**: BlueRetro disables the command response CCCD (`0x00 0x00` to `0x001B`) at the same time as enabling the input CCCD. Omitting this may prevent input data from flowing.
+**Cause**: The command response CCCD (`0x00 0x00` to `0x001B`) must be disabled at the same time as enabling the GC input CCCD. Omitting this may prevent input data from flowing.
 
-**Fix**: Write both: `0x01 0x00` to `0x000B` AND `0x00 0x00` to `0x001B`.
+**Fix**: Write both: `0x01 0x00` to `0x000F` (GC input CCCD) AND `0x00 0x00` to `0x001B` (cmd response CCCD).
 
-### 5. Writing report rate descriptor
+### 5. Report rate descriptor IS required
 
-**Symptom**: Writing `0x8500` to handle `0x000D` before or after enabling notifications.
+**Note**: Earlier versions of this document stated that the report rate descriptor should not be written. This was incorrect — the ndeadly guide includes it as step 25.
 
-**Cause**: Not part of BlueRetro's protocol. May interfere with notification flow.
-
-**Fix**: Do not write to handle `0x000D`.
+**Correct usage**: Write `0x85 0x00` to handle `0x0010` (with response) after the extended vibration config and before enabling GC input notifications. This sets the report rate to ~125 Hz (8 ms interval). The characteristic UUID is `679d5510-5a24-4dee-9557-95df80486ecb`.
 
 ### 6. Using handle 0x002A (legacy output)
 
@@ -480,6 +494,14 @@ The triggers have both analog values (bytes `0x0C`–`0x0D`) and digital click b
 **Cause**: `0x002A` is the legacy Switch Pro Controller output handle. The SW2 protocol uses `0x0014` for commands with responses on `0x001A`.
 
 **Fix**: All SW2 commands go to `0x0014`.
+
+### 7. AES verification uses reversed LTK
+
+**Symptom**: `challenge verification failed` during proprietary pairing step 8.
+
+**Cause**: The LTK must be byte-reversed before use as the AES-128-ECB key. The verification formula is: `B2 == AES-128-ECB(reverse(LTK), reverse(A2))`.
+
+**Fix**: Reverse the LTK bytes before passing to AES: `algorithms.AES(bytes(reversed(ltk)))`.
 
 ### 7. BlueZ D-Bus `ServicesResolved` stays false
 
@@ -517,6 +539,6 @@ Requirements:
 ## References
 
 - [BlueRetro](https://github.com/darthcloud/BlueRetro) — ESP32 BLE-to-wired adapter with complete SW2 protocol implementation. Key files: `main/src/wired/sw2.c`, `sw2.h`
-- [switch2_input_viewer](https://github.com/ndeadly/switch2_input_viewer) — Python BLE implementation by ndeadly. Defines input report formats 0–3.
+- [switch2_controller_research](https://github.com/ndeadly/switch2_controller_research) — Comprehensive Switch 2 controller research by ndeadly. Defines the full 26-step init sequence, handle map, and crypto details.
 - [Switch2-Controllers](https://github.com/Nohzockt/Switch2-Controllers) — Windows BLE gamepad mapper. Uses legacy protocol (0x002A) with WinRT handling pairing transparently.
 - [Google Bumble](https://github.com/nicklasb/bumble) — Python BLE stack with raw HCI support. Used for the reference Linux implementation.
