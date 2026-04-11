@@ -50,6 +50,8 @@ class GamepadButton(Enum):
     B = auto()
     X = auto()
     Y = auto()
+    L = auto()    #the digital L button press at the bottom of the analog portion a.k.a. "past the bump"
+    R = auto()    #digital R button press
     LEFT_SHOULDER = auto()
     RIGHT_SHOULDER = auto()
     LEFT_THUMB = auto()
@@ -498,9 +500,11 @@ class DolphinPipeGamepad(VirtualGamepad):
         GamepadButton.B: 'B',
         GamepadButton.X: 'X',
         GamepadButton.Y: 'Y',
+        GamepadButton.L: 'L',     #L button click at the bottom of the shoulder trigger, as certain games implement the button press separately from the analog trigger values
+        GamepadButton.R: 'R',     #R click
         GamepadButton.START: 'START',
         GamepadButton.RIGHT_SHOULDER: 'Z',
-        GamepadButton.LEFT_SHOULDER: 'L',
+        GamepadButton.LEFT_SHOULDER: 'ZL',     #changing the name to distinguish it from the L click
         GamepadButton.DPAD_UP: 'D_UP',
         GamepadButton.DPAD_DOWN: 'D_DOWN',
         GamepadButton.DPAD_LEFT: 'D_LEFT',
