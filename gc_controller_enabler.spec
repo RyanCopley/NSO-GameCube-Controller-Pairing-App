@@ -69,6 +69,41 @@ if os.path.isdir(_assets_dir):
             datas.append((os.path.join(_assets_dir, f),
                           os.path.join('gc_controller', 'assets', 'controller')))
 
+# Bundle libusb on macOS/Linux so pyusb can send USB init bulk transfers.
+# Without this, the frozen app cannot find the system libusb and USB
+# enumeration fails with "No backend available".
+if sys.platform == "darwin":
+    import ctypes.util
+    _libusb = ctypes.util.find_library('usb-1.0')
+    if _libusb:
+        binaries.append((_libusb, '.'))
+    else:
+        # Fallback: check common Homebrew paths
+        for _p in ('/opt/homebrew/lib/libusb-1.0.dylib',
+                    '/usr/local/lib/libusb-1.0.dylib'):
+            if os.path.exists(_p):
+                binaries.append((_p, '.'))
+                break
+elif sys.platform == "linux":
+    import ctypes.util, ctypes
+    _libusb_name = ctypes.util.find_library('usb-1.0')
+    _libusb = None
+    if _libusb_name:
+        try:
+            _libusb = ctypes.CDLL(_libusb_name)._name
+        except OSError:
+            pass
+    if not _libusb or not os.path.isabs(_libusb):
+        for _p in ('/usr/lib/x86_64-linux-gnu/libusb-1.0.so.0',
+                    '/usr/lib/aarch64-linux-gnu/libusb-1.0.so.0',
+                    '/usr/lib/libusb-1.0.so.0',
+                    '/usr/lib64/libusb-1.0.so.0'):
+            if os.path.exists(_p):
+                _libusb = _p
+                break
+    if _libusb and os.path.isfile(_libusb):
+        binaries.append((_libusb, '.'))
+
 # Add vgamepad DLLs for Windows as binaries (not datas) so PyInstaller
 # resolves their transitive dependencies (MSVC runtime, etc.)
 # NOTE: We must NOT 'import vgamepad' here because that triggers CDLL()
@@ -190,35 +225,47 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='NSO-GameCube-Controller-Pairing-App',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=['ViGEmClient.dll'],
-    runtime_tmpdir=None,
-    console=console,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=icon_file if icon_file and os.path.exists(icon_file) else None,
-)
+_icon = icon_file if icon_file and os.path.exists(icon_file) else None
 
-# For macOS, create an app bundle
 if sys.platform == "darwin":
-    app = BUNDLE(
+    # macOS: onedir + BUNDLE avoids the fragile onefile bootloader extraction
+    # that causes SIGABRT on recent macOS versions.  Files are laid out inside
+    # the .app bundle at build time — no temp-dir extraction at launch.
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name='NSO-GameCube-Controller-Pairing-App',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        runtime_tmpdir=None,
+        console=console,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=_icon,
+    )
+
+    coll = COLLECT(
         exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='NSO-GameCube-Controller-Pairing-App',
+    )
+
+    app = BUNDLE(
+        coll,
         name='NSO-GameCube-Controller-Pairing-App.app',
-        icon=icon_file if icon_file and os.path.exists(icon_file) else None,
+        icon=_icon,
         bundle_identifier='com.nso.gamecube-controller-pairing-app',
         info_plist={
             'NSPrincipalClass': 'NSApplication',
@@ -227,4 +274,28 @@ if sys.platform == "darwin":
             'LSUIElement': False,
             'NSRequiresAquaSystemAppearance': False,
         },
+    )
+else:
+    # Windows / Linux: onefile — single self-extracting executable
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name='NSO-GameCube-Controller-Pairing-App',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=['ViGEmClient.dll'],
+        runtime_tmpdir=None,
+        console=console,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=_icon,
     )

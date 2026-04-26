@@ -374,6 +374,22 @@ class BumbleBackend:
         except Exception:
             return False
 
+    async def set_led(self, mac: str, slot_index: int) -> bool:
+        """Update the player LED on a connected controller."""
+        peer = self._peers.get(mac)
+        if not peer:
+            return False
+        try:
+            from .sw2_protocol import H_OUT_CMD, LED_MAP, build_led_cmd
+            led_idx = min(slot_index, len(LED_MAP) - 1)
+            await peer.gatt_client.write_value(
+                attribute=H_OUT_CMD,
+                value=bytearray(build_led_cmd(LED_MAP[led_idx])),
+                with_response=False)
+            return True
+        except Exception:
+            return False
+
     async def disconnect(self, mac_address: str):
         """Disconnect a specific controller."""
         self._peers.pop(mac_address, None)

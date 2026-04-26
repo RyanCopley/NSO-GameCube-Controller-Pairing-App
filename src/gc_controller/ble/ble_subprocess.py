@@ -240,6 +240,19 @@ def main():
                 if mac:
                     asyncio.create_task(backend.send_rumble(mac, data))
 
+            elif action == "set_led":
+                si = cmd.get("slot_index")
+                new_slot = cmd.get("new_slot_index", si)
+                mac = slot_macs.get(si)
+                if mac:
+                    asyncio.create_task(backend.set_led(mac, new_slot))
+
+            elif action == "cancel_all_scans":
+                for task in connect_tasks.values():
+                    if not task.done():
+                        task.cancel()
+                connect_tasks.clear()
+
             elif action == "disconnect":
                 addr = cmd.get("address")
                 si = cmd.get("slot_index")
