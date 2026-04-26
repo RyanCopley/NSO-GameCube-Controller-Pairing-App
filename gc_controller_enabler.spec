@@ -190,35 +190,47 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='NSO-GameCube-Controller-Pairing-App',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=['ViGEmClient.dll'],
-    runtime_tmpdir=None,
-    console=console,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=icon_file if icon_file and os.path.exists(icon_file) else None,
-)
+_icon = icon_file if icon_file and os.path.exists(icon_file) else None
 
-# For macOS, create an app bundle
 if sys.platform == "darwin":
-    app = BUNDLE(
+    # macOS: onedir + BUNDLE avoids the fragile onefile bootloader extraction
+    # that causes SIGABRT on recent macOS versions.  Files are laid out inside
+    # the .app bundle at build time — no temp-dir extraction at launch.
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name='NSO-GameCube-Controller-Pairing-App',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        runtime_tmpdir=None,
+        console=console,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=_icon,
+    )
+
+    coll = COLLECT(
         exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='NSO-GameCube-Controller-Pairing-App',
+    )
+
+    app = BUNDLE(
+        coll,
         name='NSO-GameCube-Controller-Pairing-App.app',
-        icon=icon_file if icon_file and os.path.exists(icon_file) else None,
+        icon=_icon,
         bundle_identifier='com.nso.gamecube-controller-pairing-app',
         info_plist={
             'NSPrincipalClass': 'NSApplication',
@@ -227,4 +239,28 @@ if sys.platform == "darwin":
             'LSUIElement': False,
             'NSRequiresAquaSystemAppearance': False,
         },
+    )
+else:
+    # Windows / Linux: onefile — single self-extracting executable
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name='NSO-GameCube-Controller-Pairing-App',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=['ViGEmClient.dll'],
+        runtime_tmpdir=None,
+        console=console,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=_icon,
     )
