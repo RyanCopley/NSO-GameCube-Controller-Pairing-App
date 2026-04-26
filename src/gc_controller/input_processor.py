@@ -141,6 +141,12 @@ class InputProcessor:
         self._prof_last_print = 0.0
         self._prof_report_count = 0
 
+        # Raw calibration sampling (printed alongside latency stats when profiling)
+        self._raw_mins = None
+        self._raw_maxs = None
+        self._raw_sums = None
+        self._raw_count = 0
+
     @property
     def stop_event(self) -> threading.Event:
         """Expose the stop event for reconnect logic to check."""
@@ -156,6 +162,10 @@ class InputProcessor:
             return
         self.is_reading = True
         self._stop_event.clear()
+        self._raw_mins = None
+        self._raw_maxs = None
+        self._raw_sums = None
+        self._raw_count = 0
         target = self._read_loop_ble if mode == 'ble' else self._read_loop
         self._read_thread = threading.Thread(target=target, daemon=True)
         self._read_thread.start()
@@ -300,6 +310,21 @@ class InputProcessor:
             self._prof_total_times.append(total_us)
             self._prof_drain_counts.append(drain_count)
 
+            raw = (left_stick_x, left_stick_y, right_stick_x, right_stick_y,
+                   left_trigger, right_trigger)
+            if self._raw_mins is None:
+                self._raw_mins = list(raw)
+                self._raw_maxs = list(raw)
+                self._raw_sums = [0] * 6
+                self._raw_count = 0
+            for j in range(6):
+                if raw[j] < self._raw_mins[j]:
+                    self._raw_mins[j] = raw[j]
+                if raw[j] > self._raw_maxs[j]:
+                    self._raw_maxs[j] = raw[j]
+                self._raw_sums[j] += raw[j]
+            self._raw_count += 1
+
             now = t_done
             if now - self._prof_last_print >= 1.0:
                 self._prof_last_print = now
@@ -351,3 +376,14 @@ class InputProcessor:
             f"drops: {drains}",
             file=sys.stderr, flush=True
         )
+
+        if self._raw_mins is not None and self._raw_count > 0:
+            labels = ('LX', 'LY', 'RX', 'RY', 'LT', 'RT')
+            avgs = [self._raw_sums[j] / self._raw_count for j in range(6)]
+            parts = []
+            for j, lbl in enumerate(labels):
+                parts.append(f"{lbl}={self._raw_mins[j]}/{avgs[j]:.0f}/{self._raw_maxs[j]}")
+            print(
+                f"[RAW CAL] {' | '.join(parts)}  (min/avg/max, n={self._raw_count})",
+                file=sys.stderr, flush=True
+            )
