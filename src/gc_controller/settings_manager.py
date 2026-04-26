@@ -4,8 +4,8 @@ Settings Manager
 Handles loading and saving calibration settings to a JSON file,
 including migration from v1/v2 (slot-based) to v3 (global-only) format.
 
-v3 format: only global settings + known_ble_devices (per-device calibration).
-No per-slot data is persisted — slots are assigned at runtime.
+v4 format: adds slot_assignments (device identity -> slot index) and
+device_links (cross-transport identity pairing) on top of v3.
 """
 
 import json
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _GLOBAL_KEYS = {
     'auto_connect', 'auto_scan_ble', 'emulation_mode', 'trigger_bump_100_percent',
     'minimize_to_tray', 'stick_deadzone', 'known_ble_devices', 'run_at_startup',
+    'slot_assignments', 'device_links',
 }
 
 
@@ -33,7 +34,7 @@ class SettingsManager:
         self._settings_file = os.path.join(settings_dir, 'gc_controller_settings.json')
 
     def load(self):
-        """Load settings from file. Handles v1, v2, and v3 formats."""
+        """Load settings from file. Handles v1, v2, v3, and v4 formats."""
         try:
             if not os.path.exists(self._settings_file):
                 logger.debug("No settings file at %s", self._settings_file)
@@ -110,19 +111,23 @@ class SettingsManager:
                 self._slot_calibrations[0][key] = global_settings[key]
 
     def _load_v3(self, saved: dict):
-        """Load v3 format — global settings only."""
+        """Load v3/v4 format — global settings only.
+
+        v4 is a superset of v3 (adds slot_assignments + device_links).
+        Missing keys fall back to defaults from DEFAULT_CALIBRATION.
+        """
         global_settings = saved.get('global', {})
         for key in _GLOBAL_KEYS:
             if key in global_settings:
                 self._slot_calibrations[0][key] = global_settings[key]
 
     def save(self):
-        """Write settings in v3 format (global only). Raises on failure."""
+        """Write settings in v4 format (global only). Raises on failure."""
         cal = self._slot_calibrations[0]
         global_settings = {key: cal[key] for key in _GLOBAL_KEYS if key in cal}
 
         output = {
-            'version': 3,
+            'version': 4,
             'global': global_settings,
         }
 

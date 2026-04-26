@@ -43,7 +43,9 @@ class SettingsDialog:
                  is_any_connected: Callable[[], bool] = lambda: False,
                  on_save: Optional[Callable] = None,
                  get_known_ble_devices: Optional[Callable] = None,
-                 on_forget_ble_device: Optional[Callable] = None):
+                 on_forget_ble_device: Optional[Callable] = None,
+                 get_device_links: Optional[Callable] = None,
+                 on_unlink_device: Optional[Callable] = None):
         self._parent = parent
         self._emu_mode_var = emu_mode_var
         self._trigger_mode_var = trigger_mode_var
@@ -59,9 +61,11 @@ class SettingsDialog:
         self._on_save = on_save
         self._get_known_ble_devices = get_known_ble_devices
         self._on_forget_ble_device = on_forget_ble_device
+        self._get_device_links = get_device_links
+        self._on_unlink_device = on_unlink_device
 
         self._dlg = customtkinter.CTkToplevel(parent)
-        self._dlg.title("Settings")
+        self._dlg.title(t("settings.title"))
         self._dlg.resizable(False, False)
         self._dlg.transient(parent)
         self._dlg.configure(fg_color=T.GC_PURPLE_DARK)
@@ -130,13 +134,13 @@ class SettingsDialog:
         ).pack(anchor=tk.W, pady=(12, 4))
 
         customtkinter.CTkRadioButton(
-            left, text="100% at bump",
+            left, text=t("settings.trigger_bump"),
             variable=self._trigger_mode_var, value=True,
             **radio_kwargs,
         ).pack(anchor=tk.W, padx=16, pady=1)
 
         customtkinter.CTkRadioButton(
-            left, text="100% at press",
+            left, text=t("settings.trigger_press"),
             variable=self._trigger_mode_var, value=False,
             **radio_kwargs,
         ).pack(anchor=tk.W, padx=16, pady=1)
@@ -249,7 +253,7 @@ class SettingsDialog:
 
         # ── Start/Stop Emulation ──
         any_connected = self._is_any_connected()
-        emu_text = "Stop Emulation" if self._is_any_emulating() else "Start Emulation"
+        emu_text = t("emu.stop") if self._is_any_emulating() else t("emu.start")
         self._emulate_btn = customtkinter.CTkButton(
             right, text=emu_text,
             command=self._on_emulate_click,
@@ -282,6 +286,21 @@ class SettingsDialog:
             self._device_list_frame.pack(anchor=tk.W, fill=tk.X)
             self._build_device_list()
 
+        # ── Device Links (USB ↔ BT) ──
+        if self._get_device_links is not None:
+            sep_links = customtkinter.CTkFrame(right, fg_color="#463F6F", height=2)
+            sep_links.pack(fill=tk.X, pady=(12, 8))
+
+            customtkinter.CTkLabel(
+                right, text=t("settings.device_links"),
+                text_color=T.TEXT_PRIMARY, font=(T.FONT_FAMILY, 16, "bold"),
+            ).pack(anchor=tk.W, pady=(0, 4))
+
+            self._links_list_frame = customtkinter.CTkFrame(
+                right, fg_color="transparent")
+            self._links_list_frame.pack(anchor=tk.W, fill=tk.X)
+            self._build_links_list()
+
         # ── About / Credits ──
         sep2 = customtkinter.CTkFrame(right, fg_color="#463F6F", height=2)
         sep2.pack(fill=tk.X, pady=(12, 8))
@@ -306,6 +325,7 @@ class SettingsDialog:
         ).pack(anchor=tk.W, pady=(8, 2))
 
         credits = [
+            ("pookee (fork)", "https://github.com/pookee/NSO-GameCube-Controller-Pairing-App"),
             ("GVNPWRS/NSO-GC-Controller-PC", "https://github.com/GVNPWRS/NSO-GC-Controller-PC"),
             ("Nohzockt/Switch2-Controllers", "https://github.com/Nohzockt/Switch2-Controllers"),
             ("isaacs-12/nso-gc-bridge", "https://github.com/isaacs-12/nso-gc-bridge"),
@@ -398,6 +418,62 @@ class SettingsDialog:
                 self._on_forget_ble_device(mac)
             self._build_device_list()
 
+    def _build_links_list(self):
+        """Rebuild the device links list."""
+        for widget in self._links_list_frame.winfo_children():
+            widget.destroy()
+
+        links = self._get_device_links() if self._get_device_links else {}
+        if not links:
+            customtkinter.CTkLabel(
+                self._links_list_frame, text=t("settings.no_links"),
+                text_color=T.TEXT_SECONDARY, font=(T.FONT_FAMILY, 13),
+            ).pack(anchor=tk.W, padx=4, pady=2)
+            return
+
+        muted_btn = dict(
+            fg_color="#463F6F",
+            hover_color="#5A5190",
+            text_color=T.TEXT_PRIMARY,
+            corner_radius=8, height=28, width=70,
+            font=(T.FONT_FAMILY, 12),
+        )
+
+        shown = set()
+        for key, val in links.items():
+            pair = tuple(sorted([key, val]))
+            if pair in shown:
+                continue
+            shown.add(pair)
+
+            row = customtkinter.CTkFrame(
+                self._links_list_frame, fg_color="transparent")
+            row.pack(anchor=tk.W, fill=tk.X, pady=1)
+
+            # Shorten identities for display
+            short_a = key.replace('usbpath:', 'USB:').replace('usb:', 'USB:').replace('ble:', 'BT:')
+            short_b = val.replace('usbpath:', 'USB:').replace('usb:', 'USB:').replace('ble:', 'BT:')
+            label = f"{short_a} \u2194 {short_b}"
+
+            customtkinter.CTkLabel(
+                row, text=label,
+                text_color=T.TEXT_SECONDARY, font=(T.FONT_FAMILY, 11),
+                wraplength=200,
+            ).pack(side=tk.LEFT, padx=(4, 8))
+
+            if self._on_unlink_device:
+                customtkinter.CTkButton(
+                    row, text=t("settings.unlink"),
+                    command=lambda k=key: self._unlink_device(k),
+                    **muted_btn,
+                ).pack(side=tk.LEFT)
+
+    def _unlink_device(self, identity: str):
+        """Remove a device link and refresh the list."""
+        if self._on_unlink_device:
+            self._on_unlink_device(identity)
+            self._build_links_list()
+
     def _on_deadzone_changed(self, value):
         """Update the deadzone label when the slider moves."""
         self._dz_label.configure(text=f"{value:.0%}")
@@ -409,14 +485,13 @@ class SettingsDialog:
 
     def _on_emulate_click(self):
         self._on_emulate_all()
-        # Update button text after toggle
-        emu_text = "Stop Emulation" if self._is_any_emulating() else "Start Emulation"
+        emu_text = t("emu.stop") if self._is_any_emulating() else t("emu.start")
         self._emulate_btn.configure(text=emu_text)
 
     def update_emulate_button(self):
         """Update the emulate button text based on current state."""
         try:
-            emu_text = "Stop Emulation" if self._is_any_emulating() else "Start Emulation"
+            emu_text = t("emu.stop") if self._is_any_emulating() else t("emu.start")
             self._emulate_btn.configure(text=emu_text)
         except Exception:
             pass

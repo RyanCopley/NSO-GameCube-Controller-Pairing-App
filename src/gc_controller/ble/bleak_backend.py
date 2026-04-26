@@ -183,10 +183,13 @@ class BleakBackend:
         # caches them separately).  If we have a target address that wasn't
         # found in the scan, try connecting directly by address — BleakClient
         # can connect to bonded devices without a prior scan result.
+        # Skip this on macOS: CoreBluetooth UUIDs can become stale after
+        # re-pairing, and direct-connecting a stale UUID blocks for the full
+        # connect_timeout (15s) with no hope of success.
         target_in_scan = target_address and any(
             a.upper() == target_address.upper() for a in found_devices)
 
-        if target_address and not target_in_scan:
+        if target_address and not target_in_scan and sys.platform != 'darwin':
             _log(f"Target {target_address} not in scan results, "
                  f"trying direct connect (bonded device?)")
             on_status(f"Connecting to {target_address}...")
@@ -200,12 +203,42 @@ class BleakBackend:
             on_status("No devices found")
             return None
 
-        _log(f"Found {len(found_devices)} device(s), trying each...")
-
-        # Build ordered list: target first (if found), then sorted by priority
-        def _sort_key(addr):
+        # Classify each device as Nintendo-like or not
+        def _is_nintendo_like(addr):
             d = found_devices[addr]
             name = (d.name or "").lower()
+            adv = found_adv.get(addr)
+            if adv:
+                md = getattr(adv, 'manufacturer_data', {})
+                if _NINTENDO_COMPANY_ID in md:
+                    return True
+            if name == "devicename" or any(
+                    p.lower() in name for p in _NINTENDO_NAME_PATTERNS):
+                return True
+            return False
+
+        # Only try devices that look like Nintendo controllers (or match
+        # the target address).  Trying every nearby BLE device wastes time
+        # and causes false-positive handshakes on unrelated peripherals.
+        candidates = [
+            a for a in found_devices
+            if _is_nintendo_like(a)
+            or (target_address and a.upper() == target_address.upper())
+        ]
+
+        if not candidates:
+            _log(f"Found {len(found_devices)} device(s) but none look "
+                 f"like Nintendo controllers")
+            on_status("No controller found")
+            return None
+
+        _log(f"Found {len(found_devices)} device(s), "
+             f"{len(candidates)} Nintendo-like, trying those...")
+
+        # Sort candidates: Nintendo manufacturer data first, then name
+        # match, then by signal strength
+        def _sort_key(addr):
+            d = found_devices[addr]
             adv = found_adv.get(addr)
             rssi = adv.rssi if adv and adv.rssi is not None else -999
             is_nintendo = False
@@ -213,6 +246,7 @@ class BleakBackend:
                 md = getattr(adv, 'manufacturer_data', {})
                 if _NINTENDO_COMPANY_ID in md:
                     is_nintendo = True
+            name = (d.name or "").lower()
             name_match = name == "devicename" or any(
                 p.lower() in name for p in _NINTENDO_NAME_PATTERNS)
             return (
@@ -222,7 +256,7 @@ class BleakBackend:
                 addr,
             )
 
-        ordered_addrs = sorted(found_devices.keys(), key=_sort_key)
+        ordered_addrs = sorted(candidates, key=_sort_key)
 
         # Move target to front if found
         if target_address:
@@ -639,6 +673,22 @@ class BleakBackend:
             return True
         except Exception as e:
             _log(f"  Rumble write failed: {type(e).__name__}: {e}")
+            return False
+
+    async def set_led(self, identifier: str, slot_index: int) -> bool:
+        """Update the player LED on a connected controller."""
+        client = self._clients.get(identifier)
+        cmd_char = self._cmd_chars.get(identifier)
+        if not client or not client.is_connected or not cmd_char:
+            return False
+        try:
+            led_idx = min(slot_index, len(LED_MAP) - 1)
+            await client.write_gatt_char(
+                cmd_char, bytearray(build_led_cmd(LED_MAP[led_idx])),
+                response=False)
+            return True
+        except Exception as e:
+            _log(f"  LED update failed: {type(e).__name__}: {e}")
             return False
 
     async def disconnect(self, identifier: str):

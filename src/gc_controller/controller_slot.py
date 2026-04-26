@@ -40,6 +40,9 @@ class ControllerSlot:
         self.device_path: Optional[bytes] = None
         self.reconnect_was_emulating = False
 
+        # Stable device identity string for slot persistence
+        self.device_identity: Optional[str] = None
+
         # BLE state (runtime only — not persisted per-slot)
         self.connection_mode: str = 'usb'
         self.ble_address: Optional[str] = None
