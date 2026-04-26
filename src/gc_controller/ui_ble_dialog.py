@@ -12,6 +12,7 @@ from typing import Optional
 import customtkinter
 
 from . import ui_theme as T
+from .i18n import t
 
 
 class BLEDevicePickerDialog:
@@ -31,7 +32,7 @@ class BLEDevicePickerDialog:
         self._result: Optional[str] = None
 
         self._dlg = customtkinter.CTkToplevel(parent)
-        self._dlg.title("Select BLE Controller")
+        self._dlg.title(t("ble_dialog.title"))
         self._dlg.resizable(False, False)
         self._dlg.transient(parent)
         self._dlg.grab_set()
@@ -41,7 +42,7 @@ class BLEDevicePickerDialog:
         frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
 
         customtkinter.CTkLabel(
-            frame, text="Select a controller to connect:",
+            frame, text=t("ble_dialog.select_prompt"),
             text_color=T.TEXT_PRIMARY, font=("", 14),
         ).pack(anchor=tk.W, pady=(0, 8))
 
@@ -68,9 +69,9 @@ class BLEDevicePickerDialog:
         self._tree = ttk.Treeview(frame, columns=cols, show="headings",
                                   height=min(len(devices), 12),
                                   style='BLE.Treeview')
-        self._tree.heading("name", text="Name")
-        self._tree.heading("address", text="Address")
-        self._tree.heading("signal", text="Signal")
+        self._tree.heading("name", text=t("ble_dialog.col_name"))
+        self._tree.heading("address", text=t("ble_dialog.col_address"))
+        self._tree.heading("signal", text=t("ble_dialog.col_signal"))
         self._tree.column("name", width=180)
         self._tree.column("address", width=160)
         self._tree.column("signal", width=60, anchor=tk.CENTER)
@@ -81,7 +82,7 @@ class BLEDevicePickerDialog:
         for dev in sorted_devices:
             rssi = dev.get('rssi', -999)
             signal = f"{rssi} dBm" if rssi > -999 else "?"
-            name = dev.get('name', '') or '(unknown)'
+            name = dev.get('name', '') or t("ble_dialog.unknown")
             self._tree.insert("", tk.END, values=(
                 name, dev['address'], signal))
 
@@ -93,7 +94,7 @@ class BLEDevicePickerDialog:
         btn_frame.pack(fill=tk.X, pady=(12, 0))
 
         customtkinter.CTkButton(
-            btn_frame, text="Cancel",
+            btn_frame, text=t("btn.cancel"),
             command=self._on_cancel,
             fg_color=T.GC_PURPLE_SURFACE,
             hover_color=T.GC_PURPLE_LIGHT,
@@ -102,7 +103,7 @@ class BLEDevicePickerDialog:
         ).pack(side=tk.RIGHT)
 
         self._connect_btn = customtkinter.CTkButton(
-            btn_frame, text="Connect",
+            btn_frame, text=t("btn.connect"),
             command=self._on_connect,
             fg_color=T.GC_PURPLE_MID,
             hover_color=T.GC_PURPLE_LIGHT,

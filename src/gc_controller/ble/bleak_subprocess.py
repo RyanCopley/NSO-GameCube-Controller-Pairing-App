@@ -303,6 +303,20 @@ def main():
                 if identifier:
                     asyncio.create_task(backend.send_rumble(identifier, data))
 
+            elif action == "set_led":
+                si = cmd.get("slot_index")
+                new_slot = cmd.get("new_slot_index", si)
+                identifier = slot_ids.get(si)
+                if identifier:
+                    asyncio.create_task(backend.set_led(identifier, new_slot))
+
+            elif action == "cancel_all_scans":
+                for task in connect_tasks.values():
+                    if not task.done():
+                        task.cancel()
+                connect_tasks.clear()
+                await do_stop_scan(backend)
+
             elif action == "disconnect":
                 addr = cmd.get("address")
                 si = cmd.get("slot_index")

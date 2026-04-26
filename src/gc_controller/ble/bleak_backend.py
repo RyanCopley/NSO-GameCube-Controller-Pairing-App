@@ -641,6 +641,22 @@ class BleakBackend:
             _log(f"  Rumble write failed: {type(e).__name__}: {e}")
             return False
 
+    async def set_led(self, identifier: str, slot_index: int) -> bool:
+        """Update the player LED on a connected controller."""
+        client = self._clients.get(identifier)
+        cmd_char = self._cmd_chars.get(identifier)
+        if not client or not client.is_connected or not cmd_char:
+            return False
+        try:
+            led_idx = min(slot_index, len(LED_MAP) - 1)
+            await client.write_gatt_char(
+                cmd_char, bytearray(build_led_cmd(LED_MAP[led_idx])),
+                response=False)
+            return True
+        except Exception as e:
+            _log(f"  LED update failed: {type(e).__name__}: {e}")
+            return False
+
     async def disconnect(self, identifier: str):
         """Disconnect a specific controller."""
         self._write_chars.pop(identifier, None)
