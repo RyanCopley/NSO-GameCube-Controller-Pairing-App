@@ -201,6 +201,11 @@ class GCControllerEnabler:
         self._scan_stream_callback: dict[int, callable] = {}
         self._ble_known_scan_slot = None  # slot being scanned for known-addr matching
 
+        # USB hotplug polling state
+        self._usb_hotplug_active = False
+        self._usb_hotplug_timer_id = None
+        self._last_seen_usb_paths: set = set()
+
         # Auto-scan state
         self._auto_scan_active = False
         self._auto_scan_timer_id = None
@@ -252,9 +257,22 @@ class GCControllerEnabler:
             self.ui.minimize_to_tray_var.trace_add(
                 'write', lambda *_: self._on_tray_setting_changed())
 
-        # Auto-connect if enabled
+        # macOS: clicking the Dock icon restores the window (pystray menu
+        # bar icons don't work reliably from a background thread on macOS).
+        if sys.platform == 'darwin':
+            try:
+                self.root.createcommand(
+                    '::tk::mac::ReopenApplication', self._restore_window)
+            except Exception:
+                pass
+
+        # Auto-connect if enabled (also starts USB hotplug polling)
         if self.slot_calibrations[0]['auto_connect']:
-            self.root.after(100, self.auto_connect_and_emulate)
+            self.root.after(100, self._auto_connect_then_hotplug)
+
+        # Start/stop USB hotplug polling when the setting is toggled at runtime
+        self.ui.auto_connect_var.trace_add(
+            'write', lambda *_: self._on_auto_connect_toggled())
 
         # Auto-init BLE if we have known addresses and auto-scan is enabled
         if self._ble_available and self._get_known_ble_addresses() and self.slot_calibrations[0].get('auto_scan_ble', True):
@@ -1385,6 +1403,105 @@ class GCControllerEnabler:
                 self.ui.update_tab_status(i, connected=True, emulating=False)
                 self.toggle_emulation(i)
 
+    def _auto_connect_then_hotplug(self):
+        """Run startup auto-connect, then start hotplug polling."""
+        self.auto_connect_and_emulate()
+        self._start_usb_hotplug()
+
+    def _on_auto_connect_toggled(self):
+        """React to the auto_connect setting being toggled at runtime."""
+        if self.ui.auto_connect_var.get():
+            self._start_usb_hotplug()
+        else:
+            self._stop_usb_hotplug()
+
+    # ── USB hotplug polling ────────────────────────────────────────
+
+    def _start_usb_hotplug(self):
+        """Begin periodic USB enumeration to detect newly plugged controllers."""
+        if self._usb_hotplug_active:
+            return
+        self._last_seen_usb_paths = {
+            d['path'] for d in ConnectionManager.enumerate_devices()
+        }
+        self._usb_hotplug_active = True
+        self._usb_hotplug_timer_id = self.root.after(
+            2000, self._usb_hotplug_tick)
+
+    def _stop_usb_hotplug(self):
+        """Stop USB hotplug polling."""
+        self._usb_hotplug_active = False
+        if self._usb_hotplug_timer_id is not None:
+            self.root.after_cancel(self._usb_hotplug_timer_id)
+            self._usb_hotplug_timer_id = None
+
+    def _usb_hotplug_tick(self):
+        """Periodic check for newly connected USB controllers."""
+        self._usb_hotplug_timer_id = None
+        if not self._usb_hotplug_active:
+            return
+
+        try:
+            current_paths = {
+                d['path'] for d in ConnectionManager.enumerate_devices()
+            }
+        except Exception:
+            current_paths = set()
+
+        new_paths = current_paths - self._last_seen_usb_paths
+        self._last_seen_usb_paths = current_paths
+
+        if new_paths:
+            self._auto_connect_new_usb(new_paths)
+
+        if self._usb_hotplug_active:
+            self._usb_hotplug_timer_id = self.root.after(
+                2000, self._usb_hotplug_tick)
+
+    def _auto_connect_new_usb(self, new_paths: set):
+        """Auto-connect newly detected USB controllers to free slots."""
+        claimed_paths = set()
+        for s in self.slots:
+            if s.is_connected and s.conn_mgr.device_path:
+                claimed_paths.add(s.conn_mgr.device_path)
+
+        unclaimed = new_paths - claimed_paths
+        if not unclaimed:
+            return
+
+        usb_devices = ConnectionManager.enumerate_usb_devices()
+        for usb_dev in usb_devices:
+            tmp = ConnectionManager(
+                on_status=lambda msg: None,
+                on_progress=lambda val: None,
+            )
+            tmp.initialize_via_usb(usb_device=usb_dev)
+
+        for path in unclaimed:
+            slot_index = None
+            for i in range(MAX_SLOTS):
+                if not self.slots[i].is_connected:
+                    slot_index = i
+                    break
+            if slot_index is None:
+                break
+
+            slot = self.slots[slot_index]
+            sui = self.ui.slots[slot_index]
+
+            if slot.conn_mgr.init_hid_device(device_path=path):
+                slot.device_path = path
+                self.slot_calibrations[slot_index]['preferred_device_path'] = \
+                    path.decode('utf-8', errors='replace')
+                slot.input_proc.start()
+                sui.connect_btn.configure(text="Disconnect USB")
+                if sui.pair_btn:
+                    sui.pair_btn.configure(state='disabled')
+                self.ui.update_tab_status(
+                    slot_index, connected=True, emulating=False)
+                self.toggle_emulation(slot_index)
+                logger.info("USB hotplug: slot %d auto-connected", slot_index)
+
     # ── Auto-reconnect ──────────────────────────────────────────────
 
     def _on_unexpected_disconnect(self, slot_index: int):
@@ -1997,15 +2114,20 @@ class GCControllerEnabler:
     # ── Lifecycle ────────────────────────────────────────────────────
 
     def on_closing(self):
-        """Handle application closing — minimize to tray or quit."""
-        if (self.ui.minimize_to_tray_var.get()
-                and _TRAY_AVAILABLE and self._tray_icon):
-            self._hide_to_tray()
-            return
+        """Handle application closing — minimize to tray/Dock or quit."""
+        if self.ui.minimize_to_tray_var.get():
+            # On macOS the Dock icon provides restore even without pystray,
+            # on other platforms we need a functioning tray icon.
+            if sys.platform == 'darwin' or (_TRAY_AVAILABLE and self._tray_icon):
+                self._hide_to_tray()
+                return
         self._actual_quit()
 
     def _actual_quit(self):
         """Perform full application shutdown and destroy the window."""
+        # Stop USB hotplug polling
+        self._stop_usb_hotplug()
+
         # Stop auto-scan loop
         self._stop_auto_scan()
 
