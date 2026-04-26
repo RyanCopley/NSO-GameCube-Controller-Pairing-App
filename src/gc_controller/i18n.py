@@ -110,6 +110,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Connected \u2014 click Calibration Wizard to configure",
         "fr": "Connectée \u2014 cliquez sur Assistant de calibration pour configurer",
     },
+    "ui.dual_connection_warning": {
+        "en": "Connected via USB and Bluetooth \u2014 you may want to disconnect one",
+        "fr": "Connectée en USB et Bluetooth \u2014 vous pouvez déconnecter l'un des deux",
+    },
 
     # ── BLE statuses ──────────────────────────────────────────────
     "ble.initializing": {
@@ -291,8 +295,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "fr": "Zone morte des sticks",
     },
     "settings.auto_connect_usb": {
-        "en": "Auto-connect USB at startup",
-        "fr": "Connexion USB automatique au démarrage",
+        "en": "Auto-connect USB",
+        "fr": "Connexion USB automatique",
     },
     "settings.auto_scan_ble": {
         "en": "Auto-scan BLE at startup",
@@ -326,6 +330,18 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Forget All",
         "fr": "Tout oublier",
     },
+    "settings.device_links": {
+        "en": "Device Links (USB \u2194 BT)",
+        "fr": "Liens entre appareils (USB \u2194 BT)",
+    },
+    "settings.no_links": {
+        "en": "No linked devices",
+        "fr": "Aucun appareil lié",
+    },
+    "settings.unlink": {
+        "en": "Unlink",
+        "fr": "Délier",
+    },
     "settings.about": {
         "en": "About",
         "fr": "À propos",
@@ -348,13 +364,33 @@ _current_lang = "en"
 
 
 def _detect_language() -> str:
-    """Detect the system language, returning 'fr' or 'en'."""
+    """Detect the system language, returning 'fr' or 'en'.
+
+    On macOS, locale env vars are often unset ('C'), so we read the
+    native AppleLanguages preference via subprocess as a fallback.
+    """
+    import sys
+
+    # Try standard locale detection first
     try:
-        loc = locale.getdefaultlocale()[0] or ""
+        loc = locale.getlocale()[0] or ""
         if loc.lower().startswith("fr"):
             return "fr"
     except Exception:
         pass
+
+    # macOS fallback: read the system language preference
+    if sys.platform == 'darwin':
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['defaults', 'read', '-g', 'AppleLanguages'],
+                capture_output=True, text=True, timeout=2)
+            if result.returncode == 0 and 'fr' in result.stdout.lower():
+                return "fr"
+        except Exception:
+            pass
+
     return "en"
 
 

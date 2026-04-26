@@ -31,12 +31,12 @@ class SlotUI:
         # BLE section
         self.pair_btn = None
 
-        # Shared status label
+        # Shared status label and connection mode badge
         self.status_label = None
+        self.conn_mode_label = None
 
         # Controller visual (replaces separate stick/trigger/button widgets)
         self.controller_visual: Optional[GCControllerVisual] = None
-
 
         # Calibration
         self.cal_wizard_btn = None
@@ -59,11 +59,15 @@ class ControllerUI:
                  ble_available: bool = False,
                  get_known_ble_devices: Optional[Callable] = None,
                  on_forget_ble_device: Optional[Callable] = None,
-                 on_auto_save: Optional[Callable] = None):
+                 on_auto_save: Optional[Callable] = None,
+                 get_device_links: Optional[Callable] = None,
+                 on_unlink_device: Optional[Callable] = None):
         self._root = root
         self._slot_calibrations = slot_calibrations
         self._slot_cal_mgrs = slot_cal_mgrs
         self._ble_available = ble_available
+        self._get_device_links = get_device_links
+        self._on_unlink_device = on_unlink_device
 
         self._trigger_bar_width = 150
         self._trigger_bar_height = 20
@@ -91,6 +95,7 @@ class ControllerUI:
 
         self._slot_connected: List[bool] = [False] * MAX_SLOTS
         self._slot_emulating: List[bool] = [False] * MAX_SLOTS
+        self._slot_conn_mode: List[Optional[str]] = [None] * MAX_SLOTS
         self._initializing = True
 
         # Settings dialog reference
@@ -202,12 +207,24 @@ class ControllerUI:
         slot_ui.controller_visual = GCControllerVisual(visual_frame)
         slot_ui.controller_visual.pack(padx=8, pady=(8, 0))
 
-        slot_ui.status_label = customtkinter.CTkLabel(
-            visual_frame, text=t("ui.ready"),
-            text_color="#FFFFFF", font=(T.FONT_FAMILY, 14),
-            anchor="center", wraplength=500,
+        # Status row: connection mode badge + status text
+        status_row = customtkinter.CTkFrame(visual_frame, fg_color="transparent")
+        status_row.pack(fill=tk.X, padx=10, pady=(2, 8))
+
+        slot_ui.conn_mode_label = customtkinter.CTkLabel(
+            status_row, text="",
+            text_color="#FFFFFF", font=(T.FONT_FAMILY, 12, "bold"),
+            fg_color="transparent",
+            corner_radius=6, width=0, height=20,
         )
-        slot_ui.status_label.pack(fill=tk.X, padx=10, pady=(2, 8))
+        # Hidden by default; shown on connect via update_tab_status
+
+        slot_ui.status_label = customtkinter.CTkLabel(
+            status_row, text=t("ui.ready"),
+            text_color="#FFFFFF", font=(T.FONT_FAMILY, 14),
+            anchor="center", wraplength=460,
+        )
+        slot_ui.status_label.pack(fill=tk.X, expand=True)
 
         # Draw saved octagons
         for side in ('left', 'right'):
@@ -291,6 +308,8 @@ class ControllerUI:
             on_save=self._on_save,
             get_known_ble_devices=self._get_known_ble_devices,
             on_forget_ble_device=self._on_forget_ble_device,
+            get_device_links=self._get_device_links,
+            on_unlink_device=self._on_unlink_device,
         )
 
     # ── UI update methods ────────────────────────────────────────────
@@ -357,12 +376,18 @@ class ControllerUI:
 
     # ── Tab status / dirty tracking ──────────────────────────────────
 
-    def update_tab_status(self, slot_index: int, connected: bool, emulating: bool):
+    def update_tab_status(self, slot_index: int, connected: bool, emulating: bool,
+                          connection_mode: str | None = None):
         """Update stored connection/emulation state and refresh tab title."""
         self._slot_connected[slot_index] = connected
         self._slot_emulating[slot_index] = emulating
+        if connection_mode is not None:
+            self._slot_conn_mode[slot_index] = connection_mode
+        elif not connected:
+            self._slot_conn_mode[slot_index] = None
         self._refresh_tab_title(slot_index)
         self._update_connect_btn_visibility(slot_index)
+        self._update_conn_mode_badge(slot_index)
 
         # Update player LED indicators
         s = self.slots[slot_index]
@@ -382,7 +407,13 @@ class ControllerUI:
         """Rebuild tab title from connection state."""
         prefix = "\u2713 " if self._slot_connected[slot_index] else ""
         base = f"Controller {slot_index + 1}"
-        new_name = prefix + base
+        mode = self._slot_conn_mode[slot_index]
+        if self._slot_connected[slot_index] and mode:
+            mode_labels = {'usb': ' (USB)', 'ble': ' (BT)', 'dual': ' (USB+BT)'}
+            suffix = mode_labels.get(mode, '')
+        else:
+            suffix = ""
+        new_name = prefix + base + suffix
         old_name = self._tab_names[slot_index]
 
         if new_name != old_name:
@@ -394,6 +425,32 @@ class ControllerUI:
                     self.tabview._current_name = new_name
             except Exception:
                 pass
+
+    def _update_conn_mode_badge(self, slot_index: int):
+        """Show or hide the connection mode badge next to the status label."""
+        s = self.slots[slot_index]
+        mode = self._slot_conn_mode[slot_index]
+
+        if not self._slot_connected[slot_index] or not mode:
+            s.conn_mode_label.pack_forget()
+            return
+
+        if mode == 'dual':
+            text = " USB + BT "
+            fg = "#E65100"
+        elif mode == 'usb':
+            text = " USB "
+            fg = "#2E7D32"
+        elif mode == 'ble':
+            text = " BT "
+            fg = "#1565C0"
+        else:
+            text = f" {mode.upper()} "
+            fg = "#555555"
+
+        s.conn_mode_label.configure(text=text, fg_color=fg)
+        if not s.conn_mode_label.winfo_ismapped():
+            s.conn_mode_label.pack(side=tk.LEFT, padx=(0, 6))
 
     # ── BLE scanning LED animation ────────────────────────────────────
 

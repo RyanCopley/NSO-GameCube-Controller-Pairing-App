@@ -91,6 +91,8 @@ DEFAULT_CALIBRATION = {
     'preferred_device_path': '',
     'stick_left_octagon': None,
     'stick_right_octagon': None,
+    'slot_assignments': {},
+    'device_links': {},
 }
 
 # Calibration keys that are per-device (follow the physical controller, not the slot).
@@ -110,6 +112,35 @@ BLE_DEVICE_CAL_KEYS = {
 BLE_RUMBLE_HANDLE = 0x0016        # ATT handle for command + rumble channel
 BLE_RUMBLE_PACKET_LEN = 21        # Total packet length
 BLE_RUMBLE_TID_BASE = 0x50        # Transaction ID base (lower nibble increments)
+
+
+def make_ble_device_identity(mac: str) -> str:
+    """Build a stable device identity string from a BLE MAC address."""
+    return f"ble:{mac.upper()}"
+
+
+def make_usb_device_identity(hid_info: dict) -> str:
+    """Build a device identity string from an hidapi enumeration dict.
+
+    Prefers serial_number (stable across USB ports) and falls back to
+    the device path (stable only for the same physical port).
+    Placeholder serials like "00" or "0" are ignored — the NSO GC adapter
+    reports "00" identically for all four ports.
+    """
+    serial = (hid_info.get('serial_number') or '').strip()
+    if serial and serial not in ('0', '00', '000', '0000'):
+        return f"usb:{serial}"
+    path = hid_info.get('path', b'')
+    if isinstance(path, bytes):
+        path = path.decode('utf-8', errors='replace')
+    return f"usbpath:{path}"
+
+
+def make_usb_device_identity_from_path(path) -> str:
+    """Build a fallback device identity from a raw HID path (bytes or str)."""
+    if isinstance(path, bytes):
+        path = path.decode('utf-8', errors='replace')
+    return f"usbpath:{path}"
 
 
 def normalize(raw, center, range_val):

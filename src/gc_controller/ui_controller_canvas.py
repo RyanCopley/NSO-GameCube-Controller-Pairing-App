@@ -49,6 +49,14 @@ class GCControllerVisual:
     TRIGGER_W = 130
     TRIGGER_H = 20
 
+    # ── Z / ZL button indicator geometry (next to trigger bars) ──────
+    _Z_INDICATOR_W = 30
+    _Z_INDICATOR_H = TRIGGER_H           # same height as trigger bars
+    _Z_INDICATOR_X = TRIGGER_R_X + TRIGGER_W + 6   # right of R trigger
+    _Z_INDICATOR_Y = TRIGGER_R_Y
+    _ZL_INDICATOR_X = TRIGGER_L_X - _Z_INDICATOR_W - 6  # left of L trigger
+    _ZL_INDICATOR_Y = TRIGGER_L_Y
+
     # ── Player LED geometry (between L/R trigger bars) ────────────────
     LED_SIZE = 6
     LED_GAP = 4
@@ -207,10 +215,13 @@ class GCControllerVisual:
         # 2. Trigger fill bars (lightweight canvas rectangles)
         self._draw_triggers()
 
-        # 3. Player LED indicators (between trigger bars)
+        # 3. Z / ZL shoulder button indicators
+        self._draw_shoulder_indicators()
+
+        # 4. Player LED indicators (between trigger bars)
         self._draw_leds()
 
-        # 4. Calibration octagons and dots (hidden in normal mode)
+        # 5. Calibration octagons and dots (hidden in normal mode)
         self._draw_sticks()
 
     def _draw_triggers(self):
@@ -235,6 +246,21 @@ class GCControllerVisual:
                 text=side, fill=T.TEXT_PRIMARY,
                 font=("", 12, "bold"),
                 tags=f'trigger_{side}_text',
+            )
+
+    def _draw_shoulder_indicators(self):
+        """Draw Z and ZL button indicators next to their respective trigger bars."""
+        for btn, bx, by in [('Z',  self._Z_INDICATOR_X,  self._Z_INDICATOR_Y),
+                             ('ZL', self._ZL_INDICATOR_X, self._ZL_INDICATOR_Y)]:
+            w, h = self._Z_INDICATOR_W, self._Z_INDICATOR_H
+            self._rounded_rect(bx, by, bx + w, by + h, 4,
+                               fill=T.TRIGGER_BG, outline='#333',
+                               width=1, tags=f'zbtn_{btn}_bg')
+            self.canvas.create_text(
+                bx + w / 2, by + h / 2,
+                text=btn, fill=T.TEXT_DIM,
+                font=("", 10, "bold"),
+                tags=f'zbtn_{btn}_text',
             )
 
     def _draw_leds(self):
@@ -440,6 +466,19 @@ class GCControllerVisual:
         if self._dirty:
             self._dirty = False
             self._refresh_display()
+            self._update_shoulder_indicators()
+
+    def _update_shoulder_indicators(self):
+        """Update Z/ZL indicator colors based on current button state."""
+        for btn, color_off, color_on in [
+            ('Z',  T.BTN_Z_BLUE, T.BTN_Z_PRESSED),
+            ('ZL', T.BTN_Z_BLUE, T.BTN_Z_PRESSED),
+        ]:
+            pressed = self._btn_states.get(btn, False)
+            bg_color = color_on if pressed else T.TRIGGER_BG
+            txt_color = T.TEXT_PRIMARY if pressed else T.TEXT_DIM
+            self.canvas.itemconfigure(f'zbtn_{btn}_bg', fill=bg_color)
+            self.canvas.itemconfigure(f'zbtn_{btn}_text', fill=txt_color)
 
     def draw_trigger_bump_line(self, side: str, bump_raw: float):
         """Draw a vertical marker line on the trigger bar at the bump threshold.
@@ -552,6 +591,11 @@ class GCControllerVisual:
 
         # Re-render with idle frame
         self._display_photo.paste(self._idle_frame)
+
+        # Reset shoulder indicators
+        for btn in ('Z', 'ZL'):
+            self.canvas.itemconfigure(f'zbtn_{btn}_bg', fill=T.TRIGGER_BG)
+            self.canvas.itemconfigure(f'zbtn_{btn}_text', fill=T.TEXT_DIM)
 
         # Center calibration dots
         for side in ('left', 'right'):
