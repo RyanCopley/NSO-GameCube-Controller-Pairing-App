@@ -291,8 +291,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "fr": "Zone morte des sticks",
     },
     "settings.auto_connect_usb": {
-        "en": "Auto-connect USB at startup",
-        "fr": "Connexion USB automatique au démarrage",
+        "en": "Auto-connect USB",
+        "fr": "Connexion USB automatique",
     },
     "settings.auto_scan_ble": {
         "en": "Auto-scan BLE at startup",

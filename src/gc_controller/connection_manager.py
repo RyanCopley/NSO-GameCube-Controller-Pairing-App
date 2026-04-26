@@ -9,6 +9,8 @@ import logging
 import sys
 from typing import Optional, Callable, List
 
+import subprocess
+
 import hid
 import usb.core
 import usb.util
@@ -116,6 +118,92 @@ class ConnectionManager:
         except Exception as e:
             self._on_status(f"USB initialization failed: {e}")
             return False
+
+    @staticmethod
+    def set_player_led_usb(usb_device, player_num: int) -> bool:
+        """Set player LED via USB bulk transfer on a specific USB device.
+
+        Args:
+            usb_device: pyusb Device object.
+            player_num: 1–4 (cumulative LEDs: P1=1 LED, P2=2 LEDs, etc.)
+        """
+        if not 1 <= player_num <= 4:
+            return False
+
+        led_mask = (1 << player_num) - 1
+        led_data = bytearray(SET_LED_DATA)
+        led_data[8] = led_mask
+
+        try:
+            if IS_MACOS:
+                try:
+                    if usb_device.is_kernel_driver_active(1):
+                        usb_device.detach_kernel_driver(1)
+                except (usb.core.USBError, NotImplementedError):
+                    pass
+            try:
+                usb.util.claim_interface(usb_device, 1)
+            except usb.core.USBError:
+                pass
+            usb_device.write(0x02, bytes(led_data), 2000)
+            try:
+                usb.util.release_interface(usb_device, 1)
+            except usb.core.USBError:
+                pass
+            try:
+                usb.util.dispose_resources(usb_device)
+            except Exception:
+                pass
+            logger.debug("Set player LED via USB: player=%d mask=0x%02x", player_num, led_mask)
+            return True
+        except Exception as e:
+            logger.debug("Failed to set player LED via USB: %s", e)
+            return False
+
+    @staticmethod
+    def build_hid_to_usb_bus_map() -> dict:
+        """Map HID DevSrvsID → USB bus number using IOKit registry (macOS only).
+
+        Returns dict of {devsrvs_id: usb_bus_number}.
+        """
+        if not IS_MACOS:
+            return {}
+
+        try:
+            import plistlib
+            result = subprocess.run(
+                ['ioreg', '-r', '-c', 'IOUSBHostDevice', '-a'],
+                capture_output=True, timeout=5)
+            devices = plistlib.loads(result.stdout)
+        except Exception:
+            return {}
+
+        mapping = {}
+
+        def _find_hid_entry_id(children):
+            for child in (children if isinstance(children, list) else [children]):
+                if not isinstance(child, dict):
+                    continue
+                if child.get('IORegistryEntryName') == 'AppleUserUSBHostHIDDevice':
+                    return child.get('IORegistryEntryID')
+                sub = child.get('IORegistryEntryChildren', [])
+                if sub:
+                    r = _find_hid_entry_id(sub)
+                    if r:
+                        return r
+            return None
+
+        for dev in devices:
+            if dev.get('idVendor') != VENDOR_ID or dev.get('idProduct') != PRODUCT_ID:
+                continue
+            loc_id = dev.get('locationID', 0)
+            bus = (loc_id >> 24) & 0xFF
+            hid_id = _find_hid_entry_id(dev.get('IORegistryEntryChildren', []))
+            if hid_id is not None:
+                mapping[hid_id] = bus
+
+        logger.debug("HID→USB bus map: %s", mapping)
+        return mapping
 
     def init_hid_device(self, device_path: Optional[bytes] = None) -> bool:
         """Initialize HID connection.
