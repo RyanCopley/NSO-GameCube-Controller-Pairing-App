@@ -38,7 +38,7 @@ BUTTON_MAPPING = {
     'Z': GamepadButton.RIGHT_SHOULDER,
     'ZL': GamepadButton.LEFT_SHOULDER,
     'Start/Pause': GamepadButton.START,
-    'Home': GamepadButton.LEFT_THUMB,
+    'Home': GamepadButton.GUIDE,
     'Capture': GamepadButton.BACK,
     'Chat': GamepadButton.RIGHT_THUMB,
     'Dpad Up': GamepadButton.DPAD_UP,
