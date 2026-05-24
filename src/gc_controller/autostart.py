@@ -2,7 +2,7 @@
 Autostart Manager
 
 Register or unregister the app to start automatically at login.
-- Windows: Task Scheduler (schtasks) — no admin required for per-user tasks.
+- Windows: per-user Startup folder launcher.
 - Linux: systemd user service or XDG autostart .desktop file.
 - macOS: LaunchAgent plist.
 """
@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _TASK_NAME = "NSO GC Controller"
 _LAUNCHAGENT_LABEL = "com.nso.gc-controller"
+_WINDOWS_STARTUP_SCRIPT = "NSO GC Controller.vbs"
 
 
 def _get_exe_path() -> str:
@@ -28,35 +29,46 @@ def _get_exe_path() -> str:
 # ── Windows ──────────────────────────────────────────────────────────
 
 def _win_is_enabled() -> bool:
-    try:
-        result = subprocess.run(
-            ["schtasks", "/Query", "/TN", _TASK_NAME],
-            capture_output=True, text=True, creationflags=0x08000000,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
+    return os.path.isfile(_win_startup_script_path())
+
+
+def _win_startup_script_path() -> str:
+    startup_dir = os.path.join(
+        os.environ.get("APPDATA", os.path.expanduser("~")),
+        "Microsoft",
+        "Windows",
+        "Start Menu",
+        "Programs",
+        "Startup",
+    )
+    return os.path.join(startup_dir, _WINDOWS_STARTUP_SCRIPT)
+
+
+def _win_enable_startup_script():
+    exe = _get_exe_path()
+    path = _win_startup_script_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    exe_vbs = exe.replace('"', '""')
+    contents = (
+        'Set shell = CreateObject("WScript.Shell")\n'
+        f'shell.Run """" & "{exe_vbs}" & """ --minimized", 0, False\n'
+    )
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(contents)
+    logger.info("Windows startup script created: %s", path)
 
 
 def _win_enable():
-    exe = _get_exe_path()
-    cmd = [
-        "schtasks", "/Create", "/F",
-        "/TN", _TASK_NAME,
-        "/TR", f'"{exe}" --minimized',
-        "/SC", "ONLOGON",
-        "/RL", "LIMITED",
-    ]
-    subprocess.run(cmd, check=True, creationflags=0x08000000)
-    logger.info("Windows autostart task created: %s", _TASK_NAME)
+    _win_enable_startup_script()
 
 
 def _win_disable():
-    subprocess.run(
-        ["schtasks", "/Delete", "/TN", _TASK_NAME, "/F"],
-        check=True, creationflags=0x08000000,
-    )
-    logger.info("Windows autostart task removed: %s", _TASK_NAME)
+    path = _win_startup_script_path()
+    if os.path.isfile(path):
+        os.remove(path)
+        logger.info("Windows startup script removed: %s", path)
+    else:
+        logger.info("Windows startup script already absent: %s", path)
 
 
 # ── Linux ────────────────────────────────────────────────────────────
