@@ -13,6 +13,7 @@ Note: Windows users need ViGEmBus driver for Xbox 360 emulation
 """
 
 import argparse
+import atexit
 import base64
 import errno
 import json
@@ -26,6 +27,7 @@ import threading
 import time
 
 logger = logging.getLogger(__name__)
+_single_instance_lock = None
 
 try:
     import hid
@@ -44,14 +46,14 @@ from .i18n import t
 from .settings_manager import SettingsManager
 
 
-def setup_logging(debug: bool = False):
+def setup_logging():
     """Configure logging for the application.
 
-    When debug is True, sets DEBUG level and logs to both stderr and a file.
-    Otherwise, sets WARNING level (quiet by default).
+    Logs DEBUG and above to a file on every run while keeping stderr quiet by
+    default.
     """
     root_logger = logging.getLogger('gc_controller')
-    root_logger.setLevel(logging.DEBUG if debug else logging.WARNING)
+    root_logger.setLevel(logging.DEBUG)
 
     fmt = logging.Formatter(
         '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
@@ -59,19 +61,20 @@ def setup_logging(debug: bool = False):
     )
 
     stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.WARNING)
     stderr_handler.setFormatter(fmt)
     root_logger.addHandler(stderr_handler)
 
-    if debug:
-        try:
-            log_dir = _get_settings_dir()
-            log_file = os.path.join(log_dir, 'gc_controller_debug.log')
-            file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
-            file_handler.setFormatter(fmt)
-            root_logger.addHandler(file_handler)
-            print(f"Debug log: {log_file}", file=sys.stderr)
-        except Exception:
-            pass
+    try:
+        log_dir = _get_settings_dir()
+        log_file = os.path.join(log_dir, 'gc_controller.log')
+        file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(fmt)
+        root_logger.addHandler(file_handler)
+        logger.info("Logging to %s", log_file)
+    except Exception:
+        pass
 
 
 def _get_settings_dir() -> str:
@@ -93,6 +96,106 @@ def _get_settings_dir() -> str:
         os.makedirs(settings_dir, exist_ok=True)
         return settings_dir
     return os.getcwd()
+
+
+class _SingleInstanceLock:
+    """Process-wide guard that prevents multiple app instances per user."""
+
+    _WINDOWS_MUTEX_NAME = "Local\\NSOGameCubeControllerPairingApp"
+
+    def __init__(self):
+        self._handle = None
+        self._lock_file = None
+
+    def acquire(self) -> bool:
+        if sys.platform == 'win32':
+            return self._acquire_windows_mutex()
+        return self._acquire_file_lock()
+
+    def release(self):
+        if sys.platform == 'win32' and self._handle:
+            try:
+                import ctypes
+                ctypes.windll.kernel32.CloseHandle(self._handle)
+            except Exception:
+                pass
+            self._handle = None
+        elif self._lock_file:
+            try:
+                import fcntl
+                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                self._lock_file.close()
+            except Exception:
+                pass
+            self._lock_file = None
+
+    def _acquire_windows_mutex(self) -> bool:
+        import ctypes
+        import ctypes.wintypes
+
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.CreateMutexW.restype = ctypes.wintypes.HANDLE
+        kernel32.CreateMutexW.argtypes = (
+            ctypes.wintypes.LPVOID,
+            ctypes.wintypes.BOOL,
+            ctypes.wintypes.LPCWSTR,
+        )
+
+        handle = kernel32.CreateMutexW(None, False, self._WINDOWS_MUTEX_NAME)
+        if not handle:
+            return True
+        self._handle = handle
+        return ctypes.get_last_error() != 183  # ERROR_ALREADY_EXISTS
+
+    def _acquire_file_lock(self) -> bool:
+        import fcntl
+
+        lock_path = os.path.join(_get_settings_dir(), 'gc_controller.lock')
+        lock_file = open(lock_path, 'w', encoding='utf-8')
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lock_file.close()
+            return False
+        lock_file.seek(0)
+        lock_file.truncate()
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+        self._lock_file = lock_file
+        return True
+
+
+def _acquire_single_instance_lock() -> bool:
+    """Return False when another app instance is already running."""
+    global _single_instance_lock
+
+    lock = _SingleInstanceLock()
+    try:
+        acquired = lock.acquire()
+    except Exception as e:
+        print(f"Warning: single-instance check failed: {e}", file=sys.stderr)
+        return True
+
+    if not acquired:
+        lock.release()
+        return False
+
+    _single_instance_lock = lock
+    atexit.register(lock.release)
+    return True
+
+
+def _log_existing_instance():
+    """Record a duplicate launch without showing anything to the user."""
+    try:
+        log_file = os.path.join(_get_settings_dir(), 'gc_controller.log')
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write("Duplicate app launch ignored; another instance is already running.\n")
+    except Exception:
+        pass
 
 
 from .calibration import CalibrationManager
@@ -1904,10 +2007,11 @@ class GCControllerEnabler:
         png_path = os.path.join(base, "controller.png")
 
         try:
-            image = PILImage.open(png_path)
+            with PILImage.open(png_path) as loaded_image:
+                image = loaded_image.convert('RGBA').copy()
         except Exception:
             # Fallback: create a simple colored icon
-            image = PILImage.new('RGB', (64, 64), color=(83, 84, 134))
+            image = PILImage.new('RGBA', (64, 64), color=(83, 84, 134, 255))
 
         menu = pystray.Menu(
             pystray.MenuItem("Show", self._tray_show, default=True),
@@ -2917,11 +3021,6 @@ def main():
         help="emulation mode for headless operation (default: use saved setting)",
     )
     parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="enable verbose debug logging to stderr and log file",
-    )
-    parser.add_argument(
         "--scan-debug",
         action="store_true",
         help="run a single BLE scan and dump full advertisement data, then exit",
@@ -2954,7 +3053,11 @@ def main():
         from .input_processor import set_latency_profiling
         set_latency_profiling(True)
 
-    setup_logging(debug=args.debug)
+    if not _acquire_single_instance_lock():
+        _log_existing_instance()
+        return
+
+    setup_logging()
 
     from .i18n import init as i18n_init
     i18n_init(lang=args.lang)
