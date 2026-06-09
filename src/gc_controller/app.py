@@ -1904,10 +1904,11 @@ class GCControllerEnabler:
         png_path = os.path.join(base, "controller.png")
 
         try:
-            image = PILImage.open(png_path)
+            with PILImage.open(png_path) as loaded_image:
+                image = loaded_image.convert('RGBA').copy()
         except Exception:
             # Fallback: create a simple colored icon
-            image = PILImage.new('RGB', (64, 64), color=(83, 84, 134))
+            image = PILImage.new('RGBA', (64, 64), color=(83, 84, 134, 255))
 
         menu = pystray.Menu(
             pystray.MenuItem("Show", self._tray_show, default=True),
