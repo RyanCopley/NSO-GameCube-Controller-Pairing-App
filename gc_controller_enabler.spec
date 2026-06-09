@@ -40,9 +40,21 @@ if sys.platform == "linux":
     except Exception:
         pass  # gi not available — will fall back to XOrg backend
 
+# Bleak's Windows backend imports some WinRT namespaces dynamically from
+# advertisement callbacks. Collect the package explicitly so those modules are
+# present in frozen builds.
+winrt_datas = []
+winrt_binaries = []
+winrt_hiddenimports = []
+if sys.platform == "win32":
+    try:
+        winrt_datas, winrt_binaries, winrt_hiddenimports = collect_all("winrt")
+    except Exception:
+        pass
+
 # Data files to include
-datas = ctk_datas + pystray_datas + gi_datas
-binaries = ctk_binaries + pystray_binaries + gi_binaries
+datas = ctk_datas + pystray_datas + gi_datas + winrt_datas
+binaries = ctk_binaries + pystray_binaries + gi_binaries + winrt_binaries
 if os.path.exists(os.path.join('images', 'controller.png')):
     datas.append((os.path.join('images', 'controller.png'), '.'))
 if os.path.exists(os.path.join('images', 'stick_left.png')):
@@ -113,7 +125,7 @@ hiddenimports = [
     'pystray._base',
     'pystray._util',
     'six',
-] + ctk_hiddenimports + pystray_hiddenimports + gi_hiddenimports
+] + ctk_hiddenimports + pystray_hiddenimports + gi_hiddenimports + winrt_hiddenimports
 
 # Platform-conditional hidden imports
 if sys.platform == "win32":
@@ -127,6 +139,22 @@ if sys.platform == "win32":
         'gc_controller.ble.bleak_backend',
         'gc_controller.ble.bleak_subprocess',
         'gc_controller.ble.sw2_protocol',
+        'bleak.backends.winrt',
+        'bleak.backends.winrt.client',
+        'bleak.backends.winrt.scanner',
+        'bleak.backends.winrt.util',
+        'winrt',
+        'winrt.runtime',
+        'winrt.system',
+        'winrt.windows.devices.bluetooth',
+        'winrt.windows.devices.bluetooth.advertisement',
+        'winrt.windows.devices.bluetooth.genericattributeprofile',
+        'winrt.windows.devices.enumeration',
+        'winrt.windows.devices.radios',
+        'winrt.windows.foundation',
+        'winrt.windows.foundation.collections',
+        'winrt.windows.storage.streams',
+        'winrt._winrt_windows_foundation_collections',
         # pystray win32 backend
         'pystray._win32',
         'pystray._util.win32',

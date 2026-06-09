@@ -195,6 +195,9 @@ class BleakBackend:
                 on_status, on_disconnect, connect_timeout)
             if result:
                 return result
+            _log(f"Target {target_address} did not connect; skipping "
+                 "non-target devices")
+            return None
 
         if not found_devices:
             on_status("No devices found")

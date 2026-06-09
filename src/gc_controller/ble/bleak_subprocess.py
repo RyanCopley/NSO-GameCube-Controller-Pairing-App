@@ -214,6 +214,13 @@ def main():
             if p and p not in sys.path:
                 sys.path.insert(0, p)
 
+    if sys.platform == "win32":
+        try:
+            from bleak.backends.winrt.util import uninitialize_sta
+            uninitialize_sta()
+        except Exception:
+            pass
+
     try:
         from gc_controller.ble.bleak_backend import BleakBackend
     except ImportError as e:
