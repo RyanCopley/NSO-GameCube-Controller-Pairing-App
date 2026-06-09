@@ -115,6 +115,7 @@ class InputProcessor:
                  cal_mgr: CalibrationManager, emu_mgr: EmulationManager,
                  on_ui_update: Callable, on_error: Callable[[str], None],
                  on_disconnect: Optional[Callable] = None,
+                 on_controller_disconnect_request: Optional[Callable] = None,
                  ble_queue: Optional[queue.Queue] = None):
         self._device_getter = device_getter
         self._calibration = calibration
@@ -123,6 +124,7 @@ class InputProcessor:
         self._on_ui_update = on_ui_update
         self._on_error = on_error
         self._on_disconnect = on_disconnect
+        self._on_controller_disconnect_request = on_controller_disconnect_request
         self._ble_queue = ble_queue
 
         self.is_reading = False
@@ -130,6 +132,7 @@ class InputProcessor:
         self._read_thread: Optional[threading.Thread] = None
         self._ui_update_counter = 0
         self._debug_log_counter = 0
+        self._zl_disconnect_latched = False
 
         # Latency profiling state
         self._prof_last_read_t = 0.0
@@ -272,6 +275,15 @@ class InputProcessor:
             if len(data) > button.byte_index:
                 pressed = (data[button.byte_index] & button.mask) != 0
                 button_states[button.name] = pressed
+
+        zl_pressed = button_states.get('ZL', False)
+        if (self._calibration.get('zl_disconnect_enabled', False)
+                and zl_pressed and not self._zl_disconnect_latched
+                and self._on_controller_disconnect_request):
+            self._zl_disconnect_latched = True
+            self._on_controller_disconnect_request()
+        elif not zl_pressed:
+            self._zl_disconnect_latched = False
 
         left_trigger = data[13] if len(data) > 13 else 0
         right_trigger = data[14] if len(data) > 14 else 0

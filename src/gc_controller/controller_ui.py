@@ -77,6 +77,7 @@ class ControllerUI:
         self.emu_mode_var = tk.StringVar(value=emu_default)
         self.trigger_mode_var = tk.BooleanVar(value=slot_calibrations[0]['trigger_bump_100_percent'])
         self.minimize_to_tray_var = tk.BooleanVar(value=slot_calibrations[0].get('minimize_to_tray', False))
+        self.zl_disconnect_var = tk.BooleanVar(value=slot_calibrations[0].get('zl_disconnect_enabled', False))
         self.auto_scan_ble_var = tk.BooleanVar(value=slot_calibrations[0].get('auto_scan_ble', True))
         self.stick_deadzone_var = tk.DoubleVar(value=slot_calibrations[0].get('stick_deadzone', 0.05))
         self.run_at_startup_var = tk.BooleanVar(value=slot_calibrations[0].get('run_at_startup', False))
@@ -182,6 +183,7 @@ class ControllerUI:
         self.emu_mode_var.trace_add('write', _on_setting_changed)
         self.trigger_mode_var.trace_add('write', _on_setting_changed)
         self.minimize_to_tray_var.trace_add('write', _on_setting_changed)
+        self.zl_disconnect_var.trace_add('write', _on_setting_changed)
         self.auto_scan_ble_var.trace_add('write', _on_setting_changed)
         self.stick_deadzone_var.trace_add('write', _on_setting_changed)
 
@@ -281,6 +283,7 @@ class ControllerUI:
             trigger_mode_var=self.trigger_mode_var,
             auto_connect_var=self.auto_connect_var,
             minimize_to_tray_var=self.minimize_to_tray_var,
+            zl_disconnect_var=self.zl_disconnect_var,
             stick_deadzone_var=self.stick_deadzone_var,
             auto_scan_ble_var=self.auto_scan_ble_var,
             run_at_startup_var=self.run_at_startup_var,

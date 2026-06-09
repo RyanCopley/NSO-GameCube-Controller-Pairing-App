@@ -34,7 +34,8 @@ class ControllerSlot:
     """
 
     def __init__(self, index: int, calibration: dict,
-                 on_status, on_progress, on_ui_update, on_error, on_disconnect):
+                 on_status, on_progress, on_ui_update, on_error, on_disconnect,
+                 on_controller_disconnect_request=None):
         self.index = index
         self.calibration = calibration
         self.device_path: Optional[bytes] = None
@@ -61,6 +62,7 @@ class ControllerSlot:
             on_ui_update=on_ui_update,
             on_error=on_error,
             on_disconnect=on_disconnect,
+            on_controller_disconnect_request=on_controller_disconnect_request,
             ble_queue=self.ble_data_queue,
         )
 

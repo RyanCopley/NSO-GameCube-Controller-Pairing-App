@@ -87,6 +87,7 @@ DEFAULT_CALIBRATION = {
     'auto_connect': True,
     'auto_scan_ble': True,
     'minimize_to_tray': True,
+    'zl_disconnect_enabled': False,
     'run_at_startup': False,
     'preferred_device_path': '',
     'stick_left_octagon': None,

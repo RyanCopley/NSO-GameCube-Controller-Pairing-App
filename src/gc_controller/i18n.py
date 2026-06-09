@@ -302,6 +302,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "Minimize to system tray",
         "fr": "Réduire dans la zone de notification",
     },
+    "settings.zl_disconnect": {
+        "en": "Use ZL to disconnect controller",
+        "fr": "Utiliser ZL pour déconnecter la manette",
+    },
     "settings.run_at_startup": {
         "en": "Run at startup",
         "fr": "Lancer au démarrage",

@@ -34,6 +34,7 @@ class SettingsDialog:
                  trigger_mode_var: tk.BooleanVar,
                  auto_connect_var: tk.BooleanVar,
                  minimize_to_tray_var: tk.BooleanVar,
+                 zl_disconnect_var: tk.BooleanVar = None,
                  stick_deadzone_var: tk.DoubleVar = None,
                  auto_scan_ble_var: tk.BooleanVar = None,
                  run_at_startup_var: tk.BooleanVar = None,
@@ -49,6 +50,7 @@ class SettingsDialog:
         self._trigger_mode_var = trigger_mode_var
         self._auto_connect_var = auto_connect_var
         self._minimize_to_tray_var = minimize_to_tray_var
+        self._zl_disconnect_var = zl_disconnect_var
         self._stick_deadzone_var = stick_deadzone_var
         self._auto_scan_ble_var = auto_scan_ble_var
         self._run_at_startup_var = run_at_startup_var
@@ -209,6 +211,18 @@ class SettingsDialog:
             text_color=T.TEXT_PRIMARY,
             font=(T.FONT_FAMILY, 14),
         ).pack(anchor=tk.W, pady=(4, 4))
+
+        if self._zl_disconnect_var is not None:
+            customtkinter.CTkCheckBox(
+                left, text=t("settings.zl_disconnect"),
+                variable=self._zl_disconnect_var,
+                fg_color=T.RADIO_FG,
+                hover_color=T.RADIO_HOVER,
+                checkmark_color=T.BTN_TEXT,
+                border_color=T.RADIO_BORDER,
+                text_color=T.TEXT_PRIMARY,
+                font=(T.FONT_FAMILY, 14),
+            ).pack(anchor=tk.W, pady=(4, 4))
 
         # ── Run at startup ──
         if self._run_at_startup_var is not None:

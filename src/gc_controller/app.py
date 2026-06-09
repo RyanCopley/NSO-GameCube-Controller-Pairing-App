@@ -161,7 +161,8 @@ class GCControllerEnabler:
             self.slot_calibrations[0]['known_ble_devices'] = {}
 
         # Propagate per-slot global settings from slot 0 to all other slots
-        for key in ('trigger_bump_100_percent', 'emulation_mode', 'stick_deadzone'):
+        for key in ('trigger_bump_100_percent', 'emulation_mode',
+                    'stick_deadzone', 'zl_disconnect_enabled'):
             val = self.slot_calibrations[0].get(key)
             if val is not None:
                 for i in range(1, MAX_SLOTS):
@@ -180,6 +181,8 @@ class GCControllerEnabler:
                     0, lambda m=msg: self.ui.update_status(idx, m)),
                 on_disconnect=lambda idx=i: self.root.after(
                     0, lambda: self._on_unexpected_disconnect(idx)),
+                on_controller_disconnect_request=lambda idx=i: self.root.after(
+                    0, lambda: self.disconnect_controller(idx)),
             )
             self.slots.append(slot)
 
@@ -207,6 +210,7 @@ class GCControllerEnabler:
         self._auto_scan_pending = False   # True while a scan_connect is in-flight for auto-scan
         self._auto_scan_slot = None       # slot_index used for current auto-scan command
         self._auto_scan_addr_index = 0   # round-robin index for known address targeting
+        self._ble_manual_disconnect_until = {}
         self._ble_init_in_progress = False
 
         self._ble_init_retry_count = 0
@@ -819,6 +823,7 @@ class GCControllerEnabler:
             slot.ble_connected = True
             slot.ble_address = mac
             slot.connection_mode = 'ble'
+            self._ble_manual_disconnect_until.pop(mac.upper(), None)
 
             # Register device and load its calibration into this slot
             self._add_known_ble_device(mac)
@@ -1055,6 +1060,13 @@ class GCControllerEnabler:
                 10000, self._auto_scan_tick)
             return
 
+        now = time.monotonic()
+        self._ble_manual_disconnect_until = {
+            addr: until
+            for addr, until in self._ble_manual_disconnect_until.items()
+            if until > now
+        }
+
         # Build set of already-connected BLE addresses
         connected_addrs = set()
         for s in self.slots:
@@ -1062,7 +1074,11 @@ class GCControllerEnabler:
                 connected_addrs.add(s.ble_address.upper())
 
         # Check if all known controllers are already connected
-        unconnected = [a for a in known if a.upper() not in connected_addrs]
+        unconnected = [
+            a for a in known
+            if (a.upper() not in connected_addrs
+                and a.upper() not in self._ble_manual_disconnect_until)
+        ]
         if not unconnected:
             self._auto_scan_timer_id = self.root.after(
                 10000, self._auto_scan_tick)
@@ -1142,6 +1158,8 @@ class GCControllerEnabler:
         slot.ble_connected = True
         slot.ble_address = mac
         slot.connection_mode = 'ble'
+        if mac:
+            self._ble_manual_disconnect_until.pop(mac.upper(), None)
 
         # Load device's calibration into this slot
         self._add_known_ble_device(mac)
@@ -1187,6 +1205,8 @@ class GCControllerEnabler:
         # Save device calibration before disconnecting
         if slot.ble_address:
             self._save_device_calibration(slot_index, slot.ble_address)
+            self._ble_manual_disconnect_until[slot.ble_address.upper()] = (
+                time.monotonic() + 3.0)
 
         self._reset_rumble(slot_index)
         slot.input_proc.stop()
@@ -1221,7 +1241,9 @@ class GCControllerEnabler:
         self.ui.reset_slot_ui(slot_index)
         self.ui.update_tab_status(slot_index, connected=False, emulating=False)
 
-        # Reschedule auto-scan so it can reconnect this controller
+        # Reschedule auto-scan for other known controllers. The address just
+        # disconnected intentionally is suppressed until it is paired again
+        # or the app restarts.
         self._ensure_auto_scan(delay_ms=3000)
 
     def _on_ble_disconnect(self, slot_index: int):
@@ -1305,6 +1327,7 @@ class GCControllerEnabler:
         slot.ble_connected = True
         slot.ble_address = mac
         slot.input_proc.start(mode='ble')
+        self._ble_manual_disconnect_until.pop(mac.upper(), None)
 
         sui = self.ui.slots[slot_index]
         if sui.pair_btn:
@@ -1801,6 +1824,7 @@ class GCControllerEnabler:
         self.slot_calibrations[0]['emulation_mode'] = self.ui.emu_mode_var.get()
         self.slot_calibrations[0]['trigger_bump_100_percent'] = self.ui.trigger_mode_var.get()
         self.slot_calibrations[0]['minimize_to_tray'] = self.ui.minimize_to_tray_var.get()
+        self.slot_calibrations[0]['zl_disconnect_enabled'] = self.ui.zl_disconnect_var.get()
         self.slot_calibrations[0]['stick_deadzone'] = self.ui.stick_deadzone_var.get()
         self.slot_calibrations[0]['run_at_startup'] = self.ui.run_at_startup_var.get()
 
@@ -1815,6 +1839,7 @@ class GCControllerEnabler:
             cal['trigger_bump_100_percent'] = self.ui.trigger_mode_var.get()
             cal['emulation_mode'] = self.ui.emu_mode_var.get()
             cal['stick_deadzone'] = self.ui.stick_deadzone_var.get()
+            cal['zl_disconnect_enabled'] = self.ui.zl_disconnect_var.get()
             self.slots[i].cal_mgr.refresh_cache()
 
             # Save per-device calibration back to the BLE device registry
@@ -1904,10 +1929,11 @@ class GCControllerEnabler:
         png_path = os.path.join(base, "controller.png")
 
         try:
-            image = PILImage.open(png_path)
+            with PILImage.open(png_path) as loaded_image:
+                image = loaded_image.convert('RGBA').copy()
         except Exception:
             # Fallback: create a simple colored icon
-            image = PILImage.new('RGB', (64, 64), color=(83, 84, 134))
+            image = PILImage.new('RGBA', (64, 64), color=(83, 84, 134, 255))
 
         menu = pystray.Menu(
             pystray.MenuItem("Show", self._tray_show, default=True),
