@@ -339,7 +339,18 @@ class BumbleBackend:
                 if addr_str in self._connections:
                     return
                 rssi = getattr(advertisement, 'rssi', -999) or -999
-                name = advertisement.data.get(0x09, b'').decode('utf-8', errors='replace') if hasattr(advertisement, 'data') else ''
+                # AdvertisingData.get() returns str (or None), never bytes, so
+                # calling .decode() on it raises AttributeError for *every*
+                # advertisement. The bare `except Exception: pass` below then
+                # swallows it, leaving `found` empty and making this method
+                # always return [].
+                raw = advertisement.data.get(0x09) if hasattr(advertisement, 'data') else None
+                if isinstance(raw, bytes):
+                    name = raw.decode('utf-8', errors='replace')
+                elif isinstance(raw, str):
+                    name = raw
+                else:
+                    name = ''
                 if not name:
                     name = getattr(advertisement, 'name', '') or ''
                 # Keep the strongest signal if seen multiple times
