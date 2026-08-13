@@ -10,6 +10,7 @@ import queue
 from typing import Callable, Optional
 
 from bumble.device import Device, Peer, ConnectionParametersPreferences
+from bumble import hci
 from bumble.hci import Address, HCI_LE_1M_PHY, HCI_LE_2M_PHY
 from bumble.pairing import PairingConfig, PairingDelegate
 from bumble.transport import open_transport
@@ -135,6 +136,11 @@ class BumbleBackend:
                     ),
                 },
                 timeout=connect_timeout,
+                # A real Switch 2 sends CONNECT_IND with TxAdd: Public. bumble
+                # defaults own_address_type to RANDOM, so ours went out as
+                # TxAdd: Random and the controller -- which stores its bonded
+                # host's address AND type -- did not recognise us.
+                own_address_type=hci.OwnAddressType.PUBLIC,
             )
         except Exception as e:
             on_status(f"Connection failed: {e}")

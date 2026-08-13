@@ -389,8 +389,14 @@ async def sw2_init(peer: Peer, connection, device: Device, slot_index: int,
 
     # Step 4: Proprietary pairing handshake (cmd 0x15)
     on_status("Pairing (proprietary)...")
-    local_addr = device.public_address
-    if local_addr:
+    # Must be the address we actually connect FROM, and we now connect with
+    # own_address_type=PUBLIC. Also guard Address.ANY (all zeros), which bumble
+    # uses for public_address before the controller reports its BD_ADDR and
+    # which is truthy -- otherwise 00:00:00:00:00:00 gets registered as the host.
+    local_addr = getattr(device, 'public_address', None)
+    if not local_addr or not any(bytes(local_addr)):
+        local_addr = getattr(device, 'random_address', None)
+    if local_addr and any(bytes(local_addr)):
         addr_bytes = bytes(local_addr)
     else:
         addr_bytes = bytes([0xF5, 0xF4, 0xF3, 0xF2, 0xF1, 0xF0])
