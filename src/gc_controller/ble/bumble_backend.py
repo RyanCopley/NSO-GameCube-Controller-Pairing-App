@@ -21,6 +21,11 @@ from .sw2_protocol import sw2_init, translate_ble_to_usb
 _NINTENDO_OUIS = (
     '3C:A9:AB', '98:B6:E9', '7C:BB:8A', '58:2F:40',
     'D8:6B:F7', '04:03:D6', 'A4:C0:E1', '40:F4:07',
+    # Newer production units ship with OUIs outside the original list. Without
+    # these, _scan() silently discards the advertisement and the controller is
+    # never found -- with no error, because the caller only sees a scan timeout.
+    'E0:EF:BF',  # NSO GameCube controller (IEEE registry: "Nintendo Co.,Ltd")
+    '94:8E:6D',  # NSO GameCube controller, reported in #42
 )
 
 
